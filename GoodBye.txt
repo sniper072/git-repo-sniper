@@ -1,3 +1,2 @@
-print ("Goodby world!;")
-print ("Goodbye :-(;")
-print ("Goodbye, really?;")
+print ("Goodby world!")
+print ("Goodbye :-(")
