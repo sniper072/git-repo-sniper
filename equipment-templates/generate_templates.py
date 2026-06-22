@@ -23,6 +23,10 @@ COLUMN_ALIASES = {
     "office": ["офис", "office"],
     "employee": ["сотрудник", "фио", "employee", "ответственный", "пользователь"],
     "equipment_name": ["наименование", "оборудование", "название", "device", "принтер"],
+    "prev_counter": ["предыдущий месяц", "пред. месяц", "счетчик пред"],
+    "report_counter": ["отчетный месяц", "отч. месяц", "счетчик отч"],
+    "print_count": ["кол-во отпечатков", "отпечатков", "количество отпечатков", "принтов"],
+    "row_number": ["№ п/п", "№ п\\п", "номер", "n п/п"],
 }
 
 HEADER_FILL = PatternFill("solid", fgColor="D9E1F2")
@@ -87,6 +91,10 @@ def map_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         "unit": detect_column(columns, "unit"),
         "employee": detect_column(columns, "employee"),
         "equipment_name": detect_column(columns, "equipment_name"),
+        "prev_counter": detect_column(columns, "prev_counter"),
+        "report_counter": detect_column(columns, "report_counter"),
+        "print_count": detect_column(columns, "print_count"),
+        "row_number": detect_column(columns, "row_number"),
     }
 
     result = pd.DataFrame()
@@ -105,6 +113,11 @@ def map_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     )
     office_col = detect_column(columns, "office")
 
+    if office_col:
+        result["office"] = df[office_col].fillna("").astype(str).str.strip()
+    else:
+        result["office"] = ""
+
     if placement_col and result["unit"].str.strip().eq("").all():
         result["unit"] = df[placement_col].fillna("").astype(str).str.strip()
 
@@ -122,6 +135,193 @@ def map_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         result.loc[office_only, "location"] = office[office_only]
 
     return result
+
+
+def iter_devices(df: pd.DataFrame) -> list[pd.Series]:
+    devices: list[pd.Series] = []
+    for _, row in df.iterrows():
+        if not str(row.get("model", "")).strip() and not str(row.get("serial", "")).strip():
+            continue
+        devices.append(row)
+    return devices
+
+
+def device_slug(device: pd.Series) -> str:
+    inventory = sanitize_filename(str(device.get("inventory", "") or "no-inv"))
+    serial = sanitize_filename(str(device.get("serial", "") or "no-serial"))
+    return f"{inventory}_{serial}"
+
+
+CHECKLIST_ITEMS = [
+    ("Модель соответствует учетным данным", "model"),
+    ("Серийный номер соответствует", "serial"),
+    ("Инвентарный номер соответствует", "inventory"),
+    ("Место размещения соответствует", "location"),
+    ("Офис соответствует", "office"),
+    ("Подразделение соответствует", "unit"),
+    ("Показания счетчика за предыдущий месяц зафиксированы", "prev_counter"),
+    ("Показания счетчика за отчетный месяц зафиксированы", "report_counter"),
+    ("Количество отпечатков за период проверено", "print_count"),
+    ("Устройство включено и исправно", None),
+    ("Печать / сканирование выполняется", None),
+    ("Ответственный сотрудник определен", "employee"),
+    ("Внешний вид и комплектность в норме", None),
+    ("Замечания отсутствуют", None),
+]
+
+
+def write_label_value_block(ws, start_row: int, fields: list[tuple[str, str]], label_width: int = 2, value_width: int = 4) -> int:
+    row = start_row
+    for label, value in fields:
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=label_width)
+        ws.merge_cells(start_row=row, start_column=label_width + 1, end_row=row, end_column=label_width + value_width)
+        label_cell = ws.cell(row=row, column=1, value=label)
+        value_cell = ws.cell(row=row, column=label_width + 1, value=value or "—")
+        style_cell(label_cell, bold=True, fill=TABLE_HEADER_FILL)
+        style_cell(value_cell, wrap=True)
+        row += 1
+    return row
+
+
+def write_device_card(output_path: Path, device: pd.Series) -> None:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Карточка"
+    ws.column_dimensions["A"].width = 24
+    ws.column_dimensions["B"].width = 18
+    ws.column_dimensions["C"].width = 18
+    ws.column_dimensions["D"].width = 18
+    ws.column_dimensions["E"].width = 18
+    ws.column_dimensions["F"].width = 18
+
+    row = 1
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
+    title = ws.cell(row=row, column=1, value="ИНВЕНТАРНАЯ КАРТОЧКА ОРГТЕХНИКИ")
+    style_cell(title, bold=True, fill=HEADER_FILL)
+    title.alignment = Alignment(horizontal="center", vertical="center")
+
+    row += 2
+    fields = [
+        ("Дата составления:", date.today().strftime("%d.%m.%Y")),
+        ("№ п/п:", str(device.get("row_number", "") or "—")),
+        ("Инвентарный номер:", str(device.get("inventory", "") or "—")),
+        ("Марка / модель:", str(device.get("model", "") or "—")),
+        ("Серийный номер:", str(device.get("serial", "") or "—")),
+        ("Место размещения:", str(device.get("location", "") or "—")),
+        ("Офис:", str(device.get("office", "") or "—")),
+        ("Подразделение:", str(device.get("unit", "") or "—")),
+        ("Счетчик (предыдущий месяц):", str(device.get("prev_counter", "") or "—")),
+        ("Счетчик (отчетный месяц):", str(device.get("report_counter", "") or "—")),
+        ("Кол-во отпечатков:", str(device.get("print_count", "") or "—")),
+        ("Ответственный:", str(device.get("employee", "") or "—")),
+        ("Состояние:", "Исправно / Неисправно / __________________"),
+        ("Примечание:", ""),
+    ]
+    row = write_label_value_block(ws, row, fields)
+
+    row += 1
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
+    ws.cell(row=row, column=1, value="Материально ответственное лицо: __________________ / __________________")
+    style_cell(ws.cell(row=row, column=1))
+    ws.merge_cells(start_row=row, start_column=4, end_row=row, end_column=6)
+    ws.cell(row=row, column=4, value="Инвентаризатор: __________________ / __________________")
+    style_cell(ws.cell(row=row, column=4))
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(output_path)
+
+
+def write_device_checklist(output_path: Path, device: pd.Series) -> None:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Чек-лист"
+    ws.column_dimensions["A"].width = 6
+    ws.column_dimensions["B"].width = 42
+    ws.column_dimensions["C"].width = 12
+    ws.column_dimensions["D"].width = 22
+    ws.column_dimensions["E"].width = 24
+
+    row = 1
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=5)
+    title = ws.cell(row=row, column=1, value="ЧЕК-ЛИСТ ПРОВЕРКИ ОРГТЕХНИКИ")
+    style_cell(title, bold=True, fill=HEADER_FILL)
+    title.alignment = Alignment(horizontal="center", vertical="center")
+
+    row += 2
+    header_fields = [
+        ("Инвентарный номер:", str(device.get("inventory", "") or "—")),
+        ("Модель:", str(device.get("model", "") or "—")),
+        ("Серийный номер:", str(device.get("serial", "") or "—")),
+        ("Местоположение:", str(device.get("location", "") or "—")),
+        ("Дата проверки:", date.today().strftime("%d.%m.%Y")),
+    ]
+    row = write_label_value_block(ws, row, header_fields, label_width=1, value_width=4)
+
+    row += 1
+    headers = ["№", "Пункт проверки", "Да / Нет", "Фактическое значение", "Примечание"]
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=row, column=col_idx, value=header)
+        style_cell(cell, bold=True, fill=TABLE_HEADER_FILL)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    row += 1
+    for index, (label, field_key) in enumerate(CHECKLIST_ITEMS, start=1):
+        fact = str(device.get(field_key, "") or "") if field_key else ""
+        values = [index, label, "", fact, ""]
+        for col_idx, value in enumerate(values, start=1):
+            cell = ws.cell(row=row, column=col_idx, value=value)
+            style_cell(cell, wrap=True)
+            if col_idx in {1, 3}:
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+        row += 1
+
+    row += 1
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=2)
+    ws.cell(row=row, column=1, value="Проверил: __________________ / __________________")
+    style_cell(ws.cell(row=row, column=1))
+    ws.merge_cells(start_row=row, start_column=4, end_row=row, end_column=5)
+    ws.cell(row=row, column=4, value="Подпись ответственного: __________________")
+    style_cell(ws.cell(row=row, column=4))
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(output_path)
+
+
+def generate_device_documents(
+    xlsx_path: Path,
+    output_dir: Path,
+    *,
+    cards: bool = True,
+    checklists: bool = True,
+    test_only: bool = False,
+    filename_prefix: str = "",
+) -> list[Path]:
+    sheets = read_equipment_workbook(xlsx_path)
+    created: list[Path] = []
+    cards_dir = output_dir / "device-cards"
+    checklists_dir = output_dir / "checklists"
+
+    for sheet_name, raw_df in sheets.items():
+        mapped = map_dataframe(raw_df)
+        devices = iter_devices(mapped)
+        if test_only:
+            devices = devices[:1]
+
+        for device in devices:
+            slug = device_slug(device)
+            if cards:
+                card_path = cards_dir / f"{filename_prefix}Карточка_{slug}.xlsx"
+                write_device_card(card_path, device)
+                created.append(card_path)
+            if checklists:
+                checklist_path = checklists_dir / f"{filename_prefix}Чеклист_{slug}.xlsx"
+                write_device_checklist(checklist_path, device)
+                created.append(checklist_path)
+
+        if test_only:
+            break
+
+    return created
 
 
 def split_by_unit(df: pd.DataFrame, fallback_unit: str) -> dict[str, pd.DataFrame]:
@@ -388,7 +588,17 @@ def main() -> None:
     parser.add_argument(
         "--test",
         action="store_true",
-        help="Generate one test template from the first sheet/unit in source xlsx",
+        help="Generate one unit vedemost template from the first department",
+    )
+    parser.add_argument(
+        "--device-test",
+        action="store_true",
+        help="Generate one inventory card and one checklist for the first device",
+    )
+    parser.add_argument(
+        "--device-all",
+        action="store_true",
+        help="Generate inventory cards and checklists for all devices",
     )
     args = parser.parse_args()
 
@@ -425,8 +635,21 @@ def main() -> None:
         raise SystemExit(
             f"Source file not found.\n"
             f"Upload 'Этажи покопийка AI.xlsx' to: {input_dir.resolve()}\n"
-            f"Then run: python equipment-templates/generate_templates.py --sample-only"
+            f"Then run: python equipment-templates/generate_templates.py --device-test"
         )
+
+    if args.device_test or args.device_all:
+        created = generate_device_documents(
+            source_xlsx,
+            args.output_dir,
+            test_only=args.device_test,
+            filename_prefix="TEST_" if args.device_test else "",
+        )
+        if not created:
+            raise SystemExit("No device documents were generated.")
+        for path in created:
+            print(f"Created: {path}")
+        return
 
     sample_only = args.sample_only
     if args.test and not sample_only:
