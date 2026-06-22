@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import re
+import zipfile
 from datetime import date
 from pathlib import Path
 
 import pandas as pd
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 
 INPUT_DIR = Path("equipment-templates/input")
 TEMPLATE_DIR = INPUT_DIR / "templates"
@@ -358,36 +359,135 @@ def rendered_text_to_dataframe(rendered_text: str) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["Поле", "Значение", "Ед.", "Отметка"]).fillna("")
 
 
+def write_dataframe_xlsx(path: Path, sheet_name: str, frame: pd.DataFrame) -> None:
+    """Write dataframe with openpyxl only (no pandas ExcelWriter)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = sheet_name[:31]
+
+    headers = list(frame.columns)
+    for column_index, header in enumerate(headers, start=1):
+        worksheet.cell(row=1, column=column_index, value=header)
+
+    for row_index, row in enumerate(frame.itertuples(index=False), start=2):
+        for column_index, value in enumerate(row, start=1):
+            cell_value = "" if value is None or str(value) in {"", "nan", "None"} else str(value)
+            worksheet.cell(row=row_index, column=column_index, value=cell_value)
+
+    worksheet.column_dimensions["A"].width = 56
+    worksheet.column_dimensions["B"].width = 18
+    worksheet.column_dimensions["C"].width = 8
+    worksheet.column_dimensions["D"].width = 22
+
+    workbook.save(path)
+    validate_xlsx(path)
+
+
 def write_template_document(output_path: Path, sheet_name: str, rendered_text: str) -> Path:
     """Write template as columns: one value per cell for manual filling."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     frame = rendered_text_to_dataframe(rendered_text).astype(str).replace("nan", "")
-
-    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-        frame.to_excel(writer, sheet_name=sheet_name[:31], index=False)
-        worksheet = writer.sheets[sheet_name[:31]]
-        worksheet.column_dimensions["A"].width = 56
-        worksheet.column_dimensions["B"].width = 18
-        worksheet.column_dimensions["C"].width = 8
-        worksheet.column_dimensions["D"].width = 22
-
-    validate_xlsx(output_path)
+    write_dataframe_xlsx(output_path, sheet_name, frame)
     return output_path
 
 
 def write_template_bundle(output_path: Path, documents: dict[str, str]) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    workbook = Workbook()
+    workbook.remove(workbook.active)
 
-    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-        for sheet_name, rendered_text in documents.items():
-            frame = rendered_text_to_dataframe(rendered_text).astype(str).replace("nan", "")
-            safe_name = sheet_name[:31]
-            frame.to_excel(writer, sheet_name=safe_name, index=False)
-            worksheet = writer.sheets[safe_name]
-            worksheet.column_dimensions["A"].width = 56
-            worksheet.column_dimensions["B"].width = 18
-            worksheet.column_dimensions["C"].width = 8
-            worksheet.column_dimensions["D"].width = 22
+    for sheet_name, rendered_text in documents.items():
+        frame = rendered_text_to_dataframe(rendered_text).astype(str).replace("nan", "")
+        safe_name = sheet_name[:31]
+        worksheet = workbook.create_sheet(title=safe_name)
 
+        headers = list(frame.columns)
+        for column_index, header in enumerate(headers, start=1):
+            worksheet.cell(row=1, column=column_index, value=header)
+
+        for row_index, row in enumerate(frame.itertuples(index=False), start=2):
+            for column_index, value in enumerate(row, start=1):
+                cell_value = "" if value is None or str(value) in {"", "nan", "None"} else str(value)
+                worksheet.cell(row=row_index, column=column_index, value=cell_value)
+
+        worksheet.column_dimensions["A"].width = 56
+        worksheet.column_dimensions["B"].width = 18
+        worksheet.column_dimensions["C"].width = 8
+        worksheet.column_dimensions["D"].width = 22
+
+    workbook.save(output_path)
     validate_xlsx(output_path)
     return output_path
+
+
+def write_csv(path: Path, frame: pd.DataFrame) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame.astype(str).replace("nan", "").to_csv(path, index=False, encoding="utf-8-sig")
+    return path
+
+
+def create_zip(zip_path: Path, files: list[Path]) -> Path:
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for file_path in files:
+            if file_path.exists() and file_path.is_file():
+                archive.write(file_path, arcname=file_path.name)
+    return zip_path
+
+
+def write_download_test_package(
+    download_dir: Path,
+    device: pd.Series,
+    template_dir: Path,
+) -> list[Path]:
+    """Create simple ASCII-named files and one zip for easy GitHub download."""
+    download_dir.mkdir(parents=True, exist_ok=True)
+
+    card_text = render_template(load_template(find_template("card", template_dir)), device)
+    checklist_text = render_template(load_template(find_template("checklist", template_dir)), device)
+    daily_text = render_template(load_template(find_template("daily_report", template_dir)), device)
+
+    documents = {
+        "Card": card_text,
+        "Checklist": checklist_text,
+        "DailyReport": daily_text,
+    }
+
+    created: list[Path] = []
+    simple_names = {
+        "Card": "TEST_Card",
+        "Checklist": "TEST_Checklist",
+        "DailyReport": "TEST_Daily_Report",
+    }
+
+    for sheet_key, rendered in documents.items():
+        base = simple_names[sheet_key]
+        xlsx_path = download_dir / f"{base}.xlsx"
+        csv_path = download_dir / f"{base}.csv"
+        write_template_document(xlsx_path, sheet_key, rendered)
+        write_csv(csv_path, rendered_text_to_dataframe(rendered))
+        created.extend([xlsx_path, csv_path])
+
+    all_in_one = download_dir / "TEST_All_In_One.xlsx"
+    write_template_bundle(all_in_one, documents)
+    created.append(all_in_one)
+
+    readme = download_dir / "README.txt"
+    readme.write_text(
+        "DOWNLOAD TEST FILES\n"
+        "===================\n\n"
+        "Easiest: download TEST_Package.zip (all files in one archive).\n\n"
+        "Single files in this folder:\n"
+        "  TEST_All_In_One.xlsx  - card + checklist + daily report (3 sheets)\n"
+        "  TEST_Card.xlsx\n"
+        "  TEST_Checklist.xlsx\n"
+        "  TEST_Daily_Report.xlsx\n\n"
+        "CSV copies are included if Excel does not open.\n",
+        encoding="utf-8",
+    )
+    created.append(readme)
+
+    zip_path = download_dir / "TEST_Package.zip"
+    create_zip(zip_path, created)
+    created.append(zip_path)
+    return created
