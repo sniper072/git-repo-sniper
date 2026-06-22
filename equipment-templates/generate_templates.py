@@ -15,11 +15,12 @@ from openpyxl.utils import get_column_letter
 
 # Column aliases for auto-detection (Russian + English)
 COLUMN_ALIASES = {
-    "model": ["модель", "model", "наименование", "тип", "устройство"],
+    "model": ["марка", "модель", "model", "наименование", "тип", "устройство", "оборудован"],
     "serial": ["серийный", "serial", "s/n", "sn", "сер. номер", "серийный номер"],
     "inventory": ["инвентар", "inventory", "инв. номер", "инвентарный", "инвентарный номер"],
-    "location": ["местоположение", "location", "расположение", "кабинет", "этаж", "адрес"],
-    "unit": ["подразделение", "отдел", "unit", "департамент", "служба", "филиал"],
+    "location": ["местоположение", "место размещения", "место", "location", "расположение", "кабинет", "этаж", "адрес"],
+    "unit": ["подразделение", "отдел", "unit", "департамент", "служба", "филиал", "место размещения", "офис"],
+    "office": ["офис", "office"],
     "employee": ["сотрудник", "фио", "employee", "ответственный", "пользователь"],
     "equipment_name": ["наименование", "оборудование", "название", "device", "принтер"],
 }
@@ -97,6 +98,28 @@ def map_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     if result["model"].eq("").all() and not result["equipment_name"].eq("").all():
         result["model"] = result["equipment_name"]
+
+    placement_col = next(
+        (column for column in columns if "место размещения" in normalize_header(column)),
+        None,
+    )
+    office_col = detect_column(columns, "office")
+
+    if placement_col and result["unit"].str.strip().eq("").all():
+        result["unit"] = df[placement_col].fillna("").astype(str).str.strip()
+
+    if placement_col:
+        placement = df[placement_col].fillna("").astype(str).str.strip()
+        office = (
+            df[office_col].fillna("").astype(str).str.strip()
+            if office_col
+            else pd.Series([""] * len(df), index=df.index)
+        )
+        result["location"] = placement
+        both = office.ne("") & placement.ne("")
+        result.loc[both, "location"] = placement[both] + " (" + office[both] + ")"
+        office_only = office.ne("") & placement.eq("")
+        result.loc[office_only, "location"] = office[office_only]
 
     return result
 
@@ -246,6 +269,7 @@ def generate_templates(
     txt_dir: Path,
     output_dir: Path,
     sample_only: str | None = None,
+    filename_prefix: str = "",
 ) -> list[Path]:
     txt_context = load_txt_context(txt_dir)
     sheets = read_equipment_workbook(xlsx_path)
@@ -259,7 +283,7 @@ def generate_templates(
             if sample_only and unit_name != sample_only and sheet_name != sample_only:
                 continue
 
-            filename = f"Ведомость_{sanitize_filename(unit_name)}.xlsx"
+            filename = f"{filename_prefix}Ведомость_{sanitize_filename(unit_name)}.xlsx"
             output_path = output_dir / filename
             write_template(output_path, unit_name, unit_df, txt_context)
             created.append(output_path)
@@ -409,10 +433,18 @@ def main() -> None:
         sheets = read_equipment_workbook(source_xlsx)
         first_sheet = next(iter(sheets))
         mapped = map_dataframe(sheets[first_sheet])
-        units = split_by_unit(mapped, fallback_unit=first_sheet)
-        sample_only = next(iter(units))
+        mapped = mapped[mapped["unit"].str.strip().ne("")].reset_index(drop=True)
+        units = split_by_unit(mapped, first_sheet)
+        sample_only = next(
+            (name for name in units if name.strip() and name != first_sheet),
+            next(iter(units)),
+        )
+        args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    created = generate_templates(source_xlsx, args.txt_dir, args.output_dir, sample_only)
+    prefix = "TEST_" if args.test else ""
+    created = generate_templates(
+        source_xlsx, args.txt_dir, args.output_dir, sample_only, filename_prefix=prefix
+    )
     if not created:
         raise SystemExit("No templates were generated. Check workbook sheets and columns.")
 
