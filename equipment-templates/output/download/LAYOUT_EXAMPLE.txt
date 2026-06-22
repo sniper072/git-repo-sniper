@@ -1,39 +1,39 @@
-EXCEL LAYOUT — MANUAL ENTRY GUIDE
-=================================
+EXCEL LAYOUT v3 — MANUAL ENTRY (field layout)
+=============================================
 
-Columns (row 1, dark blue header):
-  A: Поле          — label / question
-  B: Значение      — type data here
-  C: Ед.           — unit (стр., шт.)
-  D: Отметка ✓/✗   — checkbox answers or score 1-5
+Compared 2 layouts on 2 devices (Kyocera + HP Color):
+  compact score: 370
+  field score:   708  ← WINNER (used in all files)
 
-Row 2 (gray legend):
-  Yellow = enter manually | Blue = filled from database | Mark column = ✓ / ✗ / 1-5
+Columns (5):
+  №  |  Поле  |  Значение  |  Ед.  |  Отметка ✓/✗
 
-Row types (by color):
-  ┌─────────────────────────────────────────────────────────────┐
-  │ DARK BLUE band     Document title (КАРТОЧКА / ЧЕК-ЛИСТ)     │
-  ├─────────────────────────────────────────────────────────────┤
-  │ LIGHT BLUE band    Section: "1. ИДЕНТИФИКАЦИЯ"              │
-  ├─────────────────────────────────────────────────────────────┤
-  │ GREEN band         Step: "ШАГ 1. ВНЕШНИЙ ОСМОТР"            │
-  ├──────────────┬──────────────┬─────┬────────────────────────┤
-  │ Gray label   │ BLUE value   │     │                        │  ← from xlsx (model, serial)
-  │ Gray label   │ YELLOW empty │     │                        │  ← manual: IP, cartridge
-  │ Gray label   │ YELLOW 272864│ стр.│                        │  ← counter entry
-  │ Question...  │              │     │ YELLOW (type ✓ or ✗)   │  ← checklist item
-  │ Rating label │              │     │ YELLOW (type 1-5)      │  ← score
-  └──────────────┴──────────────┴─────┴────────────────────────┘
+Row structure:
+  Row 1   Dark blue header
+  Row 2   Legend (frozen with header)
+  Row 3   Green device strip: Model | Serial | Inv | Location
+  Row 4+  Form data
 
-Efficient workflow for engineer on site:
-  1. Open TEST_All_In_One.xlsx (or single file)
-  2. Tab through YELLOW cells only (values + marks)
-  3. In column D type: ✓  or  ✗  or  —  (dash = not applicable)
-  4. For scores type: 1, 2, 3, 4, or 5
-  5. Blue cells are read-only reference from "Этажи покопийка AI.xlsx"
+Color guide:
+  GREEN strip   Device info always visible (frozen)
+  LIGHT BLUE    Section headers (1. ИДЕНТИФИКАЦИЯ)
+  GREEN band    Checklist steps (ШАГ 1…)
+  LIGHT RED     Red-flag / escalation blocks
+  BLUE cell     Auto-filled from database
+  YELLOW cell   Type manually (thick gold border)
+  GOLD cell     Mark column — ✓ / ✗ / 1-5 (dropdown list)
 
-Example device in TEST files:
-  Model:   Kyocera ECOSYS M3040dn
-  Serial:  LS67Y43279
-  Inv:     67+
-  Office:  Риелторы (Тюмень)
+Numbered checks:
+  Column № shows 1, 2, 3… for each checklist item.
+  Say "пункт 7 — проблема" on site.
+
+Entry workflow:
+  1. Read green strip — confirm correct device
+  2. Fill yellow cells only (values + counters)
+  3. Column № + Отметка for each check (click dropdown or type ✓ ✗)
+  4. Scores 1-5 in Отметка for rating rows
+
+Compare samples (optional):
+  output/download/compare/COMPARE_device1_field_Card.xlsx
+  output/download/compare/COMPARE_device1_compact_Card.xlsx
+  output/download/compare/LAYOUT_COMPARE_REPORT.txt

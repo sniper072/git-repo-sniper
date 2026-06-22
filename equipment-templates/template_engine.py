@@ -21,7 +21,8 @@ TEMPLATE_FILES = {
     "daily_report": ["Etagi_daily_report.txt", "Etagi_ daily_report.txt"],
 }
 
-OUTPUT_COLUMNS = ["Поле", "Значение", "Ед.", "Отметка"]
+OUTPUT_COLUMNS = ["№", "Поле", "Значение", "Ед.", "Отметка"]
+LEGACY_COLUMNS = ["Поле", "Значение", "Ед.", "Отметка"]
 
 FILL_HEADER = PatternFill("solid", fgColor="2F5496")
 FILL_TITLE = PatternFill("solid", fgColor="1F3864")
@@ -33,6 +34,8 @@ FILL_INPUT = PatternFill("solid", fgColor="FFF2CC")
 FILL_MARK = PatternFill("solid", fgColor="FFE699")
 FILL_TEXT = PatternFill("solid", fgColor="FFFFFF")
 FILL_NOTE = PatternFill("solid", fgColor="EDEDED")
+FILL_DEVICE_STRIP = PatternFill("solid", fgColor="E2EFDA")
+FILL_ALERT = PatternFill("solid", fgColor="FCE4D6")
 
 FONT_HEADER = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
 FONT_TITLE = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
@@ -41,6 +44,7 @@ FONT_STEP = Font(name="Calibri", size=10, bold=True, color="375623")
 FONT_LABEL = Font(name="Calibri", size=10, bold=True)
 FONT_BODY = Font(name="Calibri", size=10)
 FONT_HINT = Font(name="Calibri", size=9, italic=True, color="666666")
+FONT_NUM = Font(name="Calibri", size=10, bold=True, color="1F3864")
 
 THIN_BORDER = Border(
     left=Side(style="thin", color="B4B4B4"),
@@ -48,6 +52,20 @@ THIN_BORDER = Border(
     top=Side(style="thin", color="B4B4B4"),
     bottom=Side(style="thin", color="B4B4B4"),
 )
+INPUT_BORDER = Border(
+    left=Side(style="medium", color="BF8F00"),
+    right=Side(style="medium", color="BF8F00"),
+    top=Side(style="medium", color="BF8F00"),
+    bottom=Side(style="medium", color="BF8F00"),
+)
+MARK_BORDER = Border(
+    left=Side(style="medium", color="C65911"),
+    right=Side(style="medium", color="C65911"),
+    top=Side(style="medium", color="C65911"),
+    bottom=Side(style="medium", color="C65911"),
+)
+
+DEFAULT_LAYOUT = "field"
 
 # Labels from Etagi templates -> device field keys
 UNDERSCORE_LABELS: list[tuple[str, str]] = [
@@ -399,7 +417,42 @@ def rendered_text_to_dataframe(rendered_text: str) -> pd.DataFrame:
 
 
 def output_frame(frame: pd.DataFrame) -> pd.DataFrame:
-    return frame[OUTPUT_COLUMNS].astype(str).replace("nan", "")
+    numbered = number_check_rows(frame)
+    return numbered[OUTPUT_COLUMNS].astype(str).replace("nan", "")
+
+
+def number_check_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    """Add № column with sequential numbers for checklist rows."""
+    result = frame.copy()
+    result["№"] = ""
+    check_no = 0
+    for index, row in result.iterrows():
+        if str(row.get("row_kind", "")) == "Проверка":
+            check_no += 1
+            result.at[index, "№"] = str(check_no)
+    return result
+
+
+def extract_device_summary(frame: pd.DataFrame) -> dict[str, str]:
+    labels = {
+        "Модель": "model",
+        "Серийный номер": "serial",
+        "Инвентарный номер": "inventory",
+        "Локация (офис/кабинет)": "location",
+        "Локация дня": "location",
+    }
+    summary = {key: "" for key in labels.values()}
+    for row in frame.itertuples(index=False):
+        field = str(getattr(row, "Поле", "") or "")
+        value = str(getattr(row, "Значение", "") or "")
+        if field in labels and value and value not in {"", "nan"}:
+            summary[labels[field]] = value
+    return summary
+
+
+def is_alert_section(field: str) -> bool:
+    upper = field.upper()
+    return "КРАСНЫЕ ФЛАГИ" in upper or "ЭСКАЛАЦ" in upper
 
 
 def is_title_row(field: str, kind: str, row_index: int) -> bool:
@@ -427,19 +480,46 @@ def set_cell_style(
         cell.border = border
 
 
-def apply_form_layout(worksheet, frame: pd.DataFrame) -> None:
-    """Apply entry-friendly Excel layout: colors, merges, validation, freeze panes."""
-    data = frame.fillna("")
-    last_col = len(OUTPUT_COLUMNS)
+def iter_form_rows(frame: pd.DataFrame):
+    """Yield row dicts; avoid itertuples (breaks on «Ед.» and «№» column names)."""
+    for _, row in frame.iterrows():
+        yield {
+            "field": str(row.get("Поле", "") or ""),
+            "value": str(row.get("Значение", "") or ""),
+            "unit": str(row.get("Ед.", "") or ""),
+            "mark": str(row.get("Отметка", "") or ""),
+            "kind": str(row.get("row_kind", "") or ""),
+            "num": str(row.get("№", "") or ""),
+        }
+
+
+def apply_form_layout(worksheet, frame: pd.DataFrame, layout_mode: str = DEFAULT_LAYOUT) -> None:
+    """Apply entry-friendly Excel layout. Modes: 'field' (numbered, device strip) or 'compact'."""
+    data = number_check_rows(frame.fillna(""))
+    use_numbering = layout_mode != "compact"
+    columns = OUTPUT_COLUMNS if use_numbering else LEGACY_COLUMNS
+    last_col = len(columns)
+    summary = extract_device_summary(frame)
+    check_counter = 0
 
     worksheet.sheet_view.showGridLines = False
-    worksheet.column_dimensions["A"].width = 46
-    worksheet.column_dimensions["B"].width = 24
-    worksheet.column_dimensions["C"].width = 7
-    worksheet.column_dimensions["D"].width = 16
+    if use_numbering:
+        worksheet.column_dimensions["A"].width = 5
+        worksheet.column_dimensions["B"].width = 42
+        worksheet.column_dimensions["C"].width = 26
+        worksheet.column_dimensions["D"].width = 7
+        worksheet.column_dimensions["E"].width = 14
+    else:
+        worksheet.column_dimensions["A"].width = 46
+        worksheet.column_dimensions["B"].width = 24
+        worksheet.column_dimensions["C"].width = 7
+        worksheet.column_dimensions["D"].width = 16
 
-    # Header row
-    headers = ["Поле", "Значение", "Ед.", "Отметка ✓/✗"]
+    headers = (
+        ["№", "Поле", "Значение", "Ед.", "Отметка ✓/✗"]
+        if use_numbering
+        else ["Поле", "Значение", "Ед.", "Отметка ✓/✗"]
+    )
     for col_idx, header in enumerate(headers, start=1):
         cell = worksheet.cell(row=1, column=col_idx, value=header)
         set_cell_style(
@@ -450,13 +530,13 @@ def apply_form_layout(worksheet, frame: pd.DataFrame) -> None:
         )
     worksheet.row_dimensions[1].height = 24
 
-    # Legend row
     worksheet.merge_cells(start_row=2, start_column=1, end_row=2, end_column=last_col)
-    legend = worksheet.cell(
-        row=2,
-        column=1,
-        value="Жёлтые ячейки — ввод вручную  |  Голубые — из базы  |  Колонка «Отметка» — ✓ / ✗ / 1-5",
+    legend_text = (
+        "№ = пункт проверки  |  Жёлтые = ввод  |  Голубые = из базы  |  Отметка: ✓ / ✗ / 1-5"
+        if use_numbering
+        else "Жёлтые ячейки — ввод вручную  |  Голубые — из базы  |  Отметка: ✓ / ✗ / 1-5"
     )
+    legend = worksheet.cell(row=2, column=1, value=legend_text)
     set_cell_style(
         legend,
         font=FONT_HINT,
@@ -466,17 +546,50 @@ def apply_form_layout(worksheet, frame: pd.DataFrame) -> None:
     )
     worksheet.row_dimensions[2].height = 18
 
-    mark_rows: list[int] = []
-    rating_rows: list[int] = []
-    start_data_row = 3
+    excel_row = 3
+    if use_numbering and any(summary.values()):
+        strip_parts = []
+        if summary["model"]:
+            strip_parts.append(f"Модель: {summary['model']}")
+        if summary["serial"]:
+            strip_parts.append(f"Серийный: {summary['serial']}")
+        if summary["inventory"]:
+            strip_parts.append(f"Инв. {summary['inventory']}")
+        if summary["location"]:
+            strip_parts.append(f"Локация: {summary['location']}")
+        worksheet.merge_cells(start_row=excel_row, start_column=1, end_row=excel_row, end_column=last_col)
+        strip_cell = worksheet.cell(row=excel_row, column=1, value="  |  ".join(strip_parts))
+        set_cell_style(
+            strip_cell,
+            font=FONT_LABEL,
+            fill=FILL_DEVICE_STRIP,
+            alignment=Alignment(horizontal="left", vertical="center", wrap_text=True),
+            border=THIN_BORDER,
+        )
+        worksheet.row_dimensions[excel_row].height = 22
+        excel_row += 1
 
-    for offset, row in enumerate(data.itertuples(index=False)):
-        excel_row = start_data_row + offset
-        field = str(getattr(row, "Поле", "") or "")
-        value = str(getattr(row, "Значение", "") or "")
-        unit = str(getattr(row, "Ед.", "") or "")
-        mark = str(getattr(row, "Отметка", "") or "")
-        kind = str(getattr(row, "row_kind", "") or "")
+    mark_rows: list[str] = []
+    rating_rows: list[str] = []
+    prev_kind = ""
+
+    def col(name: str) -> int:
+        mapping = {"num": 1, "field": 2, "value": 3, "unit": 4, "mark": 5}
+        if not use_numbering:
+            mapping = {"field": 1, "value": 2, "unit": 3, "mark": 4}
+        return mapping[name]
+
+    for offset, item in enumerate(iter_form_rows(data)):
+        field = item["field"]
+        value = item["value"]
+        unit = item["unit"]
+        mark = item["mark"]
+        kind = item["kind"]
+        num = item["num"]
+
+        if use_numbering and kind == "Раздел" and prev_kind and prev_kind not in {"", "Раздел", "Шаг"}:
+            worksheet.row_dimensions[excel_row].height = 6
+            excel_row += 1
 
         if kind == "Поле" and field == "КАРТОЧКА АППАРАТА №" and value:
             worksheet.merge_cells(start_row=excel_row, start_column=1, end_row=excel_row, end_column=last_col)
@@ -488,6 +601,8 @@ def apply_form_layout(worksheet, frame: pd.DataFrame) -> None:
                 alignment=Alignment(horizontal="center", vertical="center"),
             )
             worksheet.row_dimensions[excel_row].height = 28
+            excel_row += 1
+            prev_kind = kind
             continue
 
         if is_title_row(field, kind, offset):
@@ -500,18 +615,23 @@ def apply_form_layout(worksheet, frame: pd.DataFrame) -> None:
                 alignment=Alignment(horizontal="center", vertical="center", wrap_text=True),
             )
             worksheet.row_dimensions[excel_row].height = 28
+            excel_row += 1
+            prev_kind = kind
             continue
 
+        section_fill = FILL_ALERT if is_alert_section(field) else FILL_SECTION
         if kind == "Раздел" or (kind == "Текст" and field.isupper() and len(field) > 20):
             worksheet.merge_cells(start_row=excel_row, start_column=1, end_row=excel_row, end_column=last_col)
             section_cell = worksheet.cell(row=excel_row, column=1, value=field)
             set_cell_style(
                 section_cell,
                 font=FONT_SECTION,
-                fill=FILL_SECTION,
+                fill=section_fill,
                 alignment=Alignment(horizontal="left", vertical="center", wrap_text=True),
             )
             worksheet.row_dimensions[excel_row].height = 22
+            excel_row += 1
+            prev_kind = kind
             continue
 
         if kind == "Шаг":
@@ -524,12 +644,25 @@ def apply_form_layout(worksheet, frame: pd.DataFrame) -> None:
                 alignment=Alignment(horizontal="left", vertical="center", wrap_text=True),
             )
             worksheet.row_dimensions[excel_row].height = 20
+            excel_row += 1
+            prev_kind = kind
             continue
 
-        label_cell = worksheet.cell(row=excel_row, column=1, value=field)
-        value_cell = worksheet.cell(row=excel_row, column=2, value="" if value in {"", "nan"} else value)
-        unit_cell = worksheet.cell(row=excel_row, column=3, value="" if unit in {"", "nan"} else unit)
-        mark_cell = worksheet.cell(row=excel_row, column=4, value="" if mark in {"", "nan"} else mark)
+        if use_numbering:
+            num_cell = worksheet.cell(row=excel_row, column=col("num"), value=num if num else "")
+            set_cell_style(
+                num_cell,
+                font=FONT_NUM,
+                fill=FILL_NOTE,
+                alignment=Alignment(horizontal="center", vertical="center"),
+            )
+
+        label_cell = worksheet.cell(row=excel_row, column=col("field"), value=field)
+        value_cell = worksheet.cell(
+            row=excel_row, column=col("value"), value="" if value in {"", "nan"} else value
+        )
+        unit_cell = worksheet.cell(row=excel_row, column=col("unit"), value="" if unit in {"", "nan"} else unit)
+        mark_cell = worksheet.cell(row=excel_row, column=col("mark"), value="" if mark in {"", "nan"} else mark)
 
         set_cell_style(
             label_cell,
@@ -544,65 +677,70 @@ def apply_form_layout(worksheet, frame: pd.DataFrame) -> None:
             alignment=Alignment(horizontal="center", vertical="center"),
         )
 
+        mark_col_letter = "E" if use_numbering else "D"
+        row_ref = f"{mark_col_letter}{excel_row}"
+
         if kind == "Проверка":
+            check_counter += 1
+            if use_numbering:
+                num_cell.value = str(check_counter)
             set_cell_style(
                 label_cell,
                 font=FONT_BODY,
                 fill=FILL_TEXT,
-                alignment=Alignment(horizontal="left", vertical="top", wrap_text=True, indent=1),
+                alignment=Alignment(horizontal="left", vertical="top", wrap_text=True),
             )
-            set_cell_style(
-                value_cell,
-                font=FONT_BODY,
-                fill=FILL_TEXT,
-                alignment=Alignment(horizontal="left", vertical="center"),
-            )
+            set_cell_style(value_cell, font=FONT_BODY, fill=FILL_TEXT, alignment=Alignment(horizontal="left", vertical="center"))
             set_cell_style(
                 mark_cell,
                 font=FONT_BODY,
                 fill=FILL_MARK,
                 alignment=Alignment(horizontal="center", vertical="center"),
+                border=MARK_BORDER,
             )
-            mark_rows.append(excel_row)
-            worksheet.row_dimensions[excel_row].height = max(20, min(48, 14 + len(field) // 50 * 6))
+            mark_rows.append(row_ref)
+            worksheet.row_dimensions[excel_row].height = max(22, min(50, 16 + len(field) // 45 * 6))
+            excel_row += 1
+            prev_kind = kind
             continue
 
         if kind == "Оценка":
-            set_cell_style(
-                value_cell,
-                font=FONT_BODY,
-                fill=FILL_TEXT,
-                alignment=Alignment(horizontal="left", vertical="center"),
-            )
             if mark and "[" in mark:
                 mark_cell.value = ""
+            set_cell_style(value_cell, font=FONT_BODY, fill=FILL_TEXT, alignment=Alignment(horizontal="left", vertical="center"))
             set_cell_style(
                 mark_cell,
                 font=FONT_BODY,
                 fill=FILL_MARK,
                 alignment=Alignment(horizontal="center", vertical="center"),
+                border=MARK_BORDER,
             )
-            rating_rows.append(excel_row)
-            worksheet.row_dimensions[excel_row].height = 20
+            rating_rows.append(row_ref)
+            worksheet.row_dimensions[excel_row].height = 22
+            excel_row += 1
+            prev_kind = kind
             continue
 
         if kind == "Подпись":
-            worksheet.merge_cells(start_row=excel_row, start_column=1, end_row=excel_row, end_column=2)
-            worksheet.merge_cells(start_row=excel_row, start_column=3, end_row=excel_row, end_column=last_col)
-            set_cell_style(
-                label_cell,
-                font=FONT_LABEL,
-                fill=FILL_LABEL,
-                alignment=Alignment(horizontal="left", vertical="center"),
+            worksheet.merge_cells(
+                start_row=excel_row, start_column=col("field"), end_row=excel_row, end_column=col("value")
             )
-            sign_cell = worksheet.cell(row=excel_row, column=3, value="подпись / дата")
+            sign_col = col("unit")
+            worksheet.merge_cells(
+                start_row=excel_row, start_column=sign_col, end_row=excel_row, end_column=last_col
+            )
+            set_cell_style(label_cell, font=FONT_LABEL, fill=FILL_LABEL, alignment=Alignment(horizontal="left", vertical="center"))
+            sign_cell = worksheet.cell(row=excel_row, column=sign_col, value="подпись / дата")
             set_cell_style(
                 sign_cell,
                 font=FONT_HINT,
                 fill=FILL_INPUT,
                 alignment=Alignment(horizontal="center", vertical="center"),
+                border=INPUT_BORDER,
             )
-            worksheet.row_dimensions[excel_row].height = 24
+            worksheet.row_dimensions[excel_row].height = 26
+            excel_row += 1
+            prev_kind = kind
             continue
 
         value_empty = value in {"", "nan"}
@@ -610,22 +748,33 @@ def apply_form_layout(worksheet, frame: pd.DataFrame) -> None:
         is_comment = field.startswith("Комментарий") or field.startswith("Краткое описание")
 
         if is_comment or (kind == "Текст" and not value):
-            worksheet.merge_cells(start_row=excel_row, start_column=2, end_row=excel_row, end_column=last_col)
+            worksheet.merge_cells(
+                start_row=excel_row, start_column=col("value"), end_row=excel_row, end_column=last_col
+            )
             set_cell_style(
                 value_cell,
                 font=FONT_BODY,
                 fill=FILL_INPUT,
                 alignment=Alignment(horizontal="left", vertical="top", wrap_text=True),
+                border=INPUT_BORDER,
             )
-            worksheet.row_dimensions[excel_row].height = 28
+            worksheet.row_dimensions[excel_row].height = 32
+            excel_row += 1
+            prev_kind = kind
             continue
 
         value_fill = FILL_INPUT if value_empty or is_counter else FILL_AUTO
+        value_border = INPUT_BORDER if value_empty or is_counter else THIN_BORDER
         set_cell_style(
             value_cell,
             font=FONT_BODY,
             fill=value_fill,
-            alignment=Alignment(horizontal="left", vertical="center", wrap_text=True),
+            alignment=Alignment(
+                horizontal="right" if is_counter and not value_empty else "left",
+                vertical="center",
+                wrap_text=True,
+            ),
+            border=value_border,
         )
         set_cell_style(
             mark_cell,
@@ -633,36 +782,115 @@ def apply_form_layout(worksheet, frame: pd.DataFrame) -> None:
             fill=FILL_TEXT,
             alignment=Alignment(horizontal="center", vertical="center"),
         )
-        worksheet.row_dimensions[excel_row].height = 20
+        worksheet.row_dimensions[excel_row].height = 22
+        excel_row += 1
+        prev_kind = kind
 
     if mark_rows:
         mark_validation = DataValidation(
             type="list",
             formula1='"✓,✗,—"',
             allow_blank=True,
-            showDropDown=False,
+            showDropDown=True,
         )
         worksheet.add_data_validation(mark_validation)
-        for row_number in mark_rows:
-            mark_validation.add(f"D{row_number}")
+        for cell_ref in mark_rows:
+            mark_validation.add(cell_ref)
 
     if rating_rows:
         rating_validation = DataValidation(
             type="list",
             formula1='"1,2,3,4,5"',
             allow_blank=True,
-            showDropDown=False,
+            showDropDown=True,
         )
         worksheet.add_data_validation(rating_validation)
-        for row_number in rating_rows:
-            rating_validation.add(f"D{row_number}")
+        for cell_ref in rating_rows:
+            rating_validation.add(cell_ref)
 
-    worksheet.freeze_panes = "A3"
+    freeze_row = 4 if use_numbering and any(summary.values()) else 3
+    worksheet.freeze_panes = f"A{freeze_row}"
     worksheet.print_title_rows = "1:2"
     worksheet.page_setup.orientation = worksheet.ORIENTATION_PORTRAIT
     worksheet.page_setup.fitToWidth = 1
     worksheet.page_setup.fitToHeight = 0
     worksheet.sheet_properties.pageSetUpPr.fitToPage = True
+
+
+def score_layout_workbook(path: Path) -> dict[str, int]:
+    """Score a generated form for manual-entry usability (higher = better)."""
+    workbook = load_workbook(path, read_only=False, data_only=True)
+    worksheet = workbook.active
+    scores = {
+        "input_cells": 0,
+        "marked_checks": 0,
+        "numbered_checks": 0,
+        "device_strip": 0,
+        "validations": 0,
+        "section_gaps": 0,
+        "total": 0,
+    }
+
+    for row in worksheet.iter_rows(min_row=1, max_row=worksheet.max_row):
+        for cell in row:
+            fill_rgb = getattr(getattr(cell.fill, "fgColor", None), "rgb", "") or ""
+            value = str(cell.value or "")
+            if fill_rgb in {"00FFF2CC", "00FFE699"}:
+                scores["input_cells"] += 1
+            if fill_rgb == "00FFE699" and cell.column in {4, 5}:
+                scores["marked_checks"] += 1
+            if cell.column == 1 and value.isdigit():
+                scores["numbered_checks"] += 1
+            if "Модель:" in value and "Серийный:" in value:
+                scores["device_strip"] = 25
+            if worksheet.row_dimensions[cell.row].height and worksheet.row_dimensions[cell.row].height <= 8:
+                scores["section_gaps"] += 1
+
+    scores["validations"] = len(worksheet.data_validations.dataValidation) * 10
+    scores["total"] = (
+        scores["input_cells"] * 2
+        + scores["marked_checks"] * 3
+        + scores["numbered_checks"] * 4
+        + scores["device_strip"]
+        + scores["validations"]
+        + scores["section_gaps"] * 2
+    )
+    workbook.close()
+    return scores
+
+
+def compare_layouts_on_devices(
+    devices: list[pd.Series],
+    template_dir: Path,
+    output_dir: Path,
+) -> tuple[str, dict]:
+    """Generate compact vs field layouts for each device and return winning mode."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    totals = {"compact": 0, "field": 0}
+    details: list[str] = []
+
+    for index, device in enumerate(devices, start=1):
+        card_text = render_template(load_template(find_template("card", template_dir)), device)
+        frame = rendered_text_to_dataframe(card_text)
+        for mode in ("compact", "field"):
+            path = output_dir / f"COMPARE_device{index}_{mode}_Card.xlsx"
+            workbook = Workbook()
+            worksheet = workbook.active
+            worksheet.title = "Card"
+            apply_form_layout(worksheet, frame, layout_mode=mode)
+            workbook.save(path)
+            scores = score_layout_workbook(path)
+            totals[mode] += scores["total"]
+            details.append(
+                f"Device {index} ({device.get('model', '?')}) / {mode}: "
+                f"score={scores['total']} (inputs={scores['input_cells']}, "
+                f"numbered={scores['numbered_checks']}, strip={scores['device_strip']})"
+            )
+
+    winner = "field" if totals["field"] >= totals["compact"] else "compact"
+    report = "\n".join(details) + f"\n\nTOTAL compact={totals['compact']} field={totals['field']} → winner: {winner}"
+    (output_dir / "LAYOUT_COMPARE_REPORT.txt").write_text(report, encoding="utf-8")
+    return winner, totals
 
 
 def write_dataframe_xlsx(path: Path, sheet_name: str, frame: pd.DataFrame) -> None:
