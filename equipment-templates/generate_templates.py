@@ -270,6 +270,21 @@ def generate_templates(
     return created
 
 
+def find_source_workbook(explicit_path: Path | None, input_dir: Path) -> Path | None:
+    if explicit_path and explicit_path.exists():
+        return explicit_path
+
+    if not input_dir.exists():
+        return None
+
+    candidates = sorted(input_dir.glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for candidate in candidates:
+        if candidate.name.startswith("~$"):
+            continue
+        return candidate
+    return None
+
+
 def build_sample_data() -> tuple[pd.DataFrame, str]:
     equipment = pd.DataFrame(
         [
@@ -341,19 +356,63 @@ def main() -> None:
         action="store_true",
         help="Generate a demo sample without source files",
     )
+    parser.add_argument(
+        "--inspect",
+        action="store_true",
+        help="Print workbook sheets and detected columns, then exit",
+    )
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="Generate one test template from the first sheet/unit in source xlsx",
+    )
     args = parser.parse_args()
 
-    if args.demo or not args.xlsx.exists():
+    input_dir = Path("equipment-templates/input")
+    explicit = args.xlsx if args.xlsx.exists() else None
+    source_xlsx = find_source_workbook(explicit, input_dir)
+
+    if args.inspect:
+        if not source_xlsx:
+            raise SystemExit(f"No xlsx found in {input_dir}. Upload 'Этажи покопийка AI.xlsx' there.")
+        sheets = read_equipment_workbook(source_xlsx)
+        print(f"Source: {source_xlsx}")
+        for sheet_name, raw_df in sheets.items():
+            mapped = map_dataframe(raw_df)
+            print(f"\nSheet: {sheet_name} ({len(mapped)} rows)")
+            print("Columns:", ", ".join(raw_df.columns))
+            print("Detected:", ", ".join(f"{k}={v or '-'}" for k, v in {
+                "model": detect_column(list(raw_df.columns), "model"),
+                "serial": detect_column(list(raw_df.columns), "serial"),
+                "inventory": detect_column(list(raw_df.columns), "inventory"),
+                "location": detect_column(list(raw_df.columns), "location"),
+                "unit": detect_column(list(raw_df.columns), "unit"),
+            }.items()))
+        return
+
+    if args.demo:
         output = args.output_dir / "SAMPLE_Ведомость_для_согласования.xlsx"
         equipment, txt_context = build_sample_data()
         write_template(output, "Отдел продаж (образец)", equipment, txt_context)
         print(f"Created demo sample: {output}")
-        if not args.xlsx.exists():
-            print(f"Source file not found: {args.xlsx}")
-            print("Upload source files to equipment-templates/input/ and rerun without --demo")
         return
 
-    created = generate_templates(args.xlsx, args.txt_dir, args.output_dir, args.sample_only)
+    if not source_xlsx:
+        raise SystemExit(
+            f"Source file not found.\n"
+            f"Upload 'Этажи покопийка AI.xlsx' to: {input_dir.resolve()}\n"
+            f"Then run: python equipment-templates/generate_templates.py --sample-only"
+        )
+
+    sample_only = args.sample_only
+    if args.test and not sample_only:
+        sheets = read_equipment_workbook(source_xlsx)
+        first_sheet = next(iter(sheets))
+        mapped = map_dataframe(sheets[first_sheet])
+        units = split_by_unit(mapped, fallback_unit=first_sheet)
+        sample_only = next(iter(units))
+
+    created = generate_templates(source_xlsx, args.txt_dir, args.output_dir, sample_only)
     if not created:
         raise SystemExit("No templates were generated. Check workbook sheets and columns.")
 
