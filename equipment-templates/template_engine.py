@@ -182,73 +182,85 @@ def validate_xlsx(path: Path) -> None:
     workbook.close()
 
 
-def parse_rendered_line(line: str) -> tuple[str, str, str, str]:
-    """Split one template line into columns: type, field, value, mark."""
+def parse_rendered_line(line: str) -> tuple[str, str, str, str, str]:
+    """Split one template line into: type, field, value, unit, mark."""
     raw = line.rstrip()
     stripped = raw.strip()
 
     if not stripped:
-        return ("", "", "", "")
+        return ("", "", "", "", "")
 
     if stripped.startswith("════") or stripped.startswith("────") or stripped.startswith("┌") or stripped.startswith("│") or stripped.startswith("└"):
-        return ("Заголовок", stripped, "", "")
+        return ("Заголовок", stripped, "", "", "")
 
     if re.match(r"^\d+\.\s+", stripped):
-        return ("Раздел", stripped, "", "")
+        return ("Раздел", stripped, "", "", "")
 
     if re.match(r"^ШАГ\s+\d+", stripped, flags=re.IGNORECASE):
-        return ("Шаг", stripped, "", "")
+        return ("Шаг", stripped, "", "", "")
 
     checkbox_match = re.match(r"^(\[\s*\]|\[.\]|□)\s*(.+)$", stripped)
     if checkbox_match:
-        return ("Проверка", checkbox_match.group(2).strip(), "", "")
+        text = checkbox_match.group(2).strip()
+        extra_value = ""
+        if "_____" in text:
+            extra_value = re.sub(r".*_____\s*", "", text).strip() if "_____" in text else ""
+        return ("Проверка", text, extra_value, "", "☐")
+
+    rating_match = re.match(r"^(.+?):\s*((?:\[\s*\d\s*\]\s*)+)$", stripped)
+    if rating_match:
+        return ("Оценка", rating_match.group(1).strip(), "", "", rating_match.group(2).strip())
 
     if "🟢" in stripped or "🟡" in stripped or "🔴" in stripped:
         label_match = re.match(r"^([🟢🟡🔴]\s*.+?:)\s*(.*)$", stripped)
         if label_match:
             value = label_match.group(2).strip()
             value = "" if re.fullmatch(r"_+\s*шт\.?", value) else value.replace("_", "").strip()
-            return ("Поле", label_match.group(1).strip(), value, "")
-
-    if "Дата:" in stripped and "Инженер:" in stripped:
-        parts = re.findall(
-            r"(Дата|Инженер):\s*([^А-Яа-яЁё]*[A-Za-zА-Яа-яЁё0-9.+:\-\s]*?)(?=\s+(?:Дата|Инженер):|$)",
-            stripped,
-        )
-        if len(parts) >= 2:
-            # Return first part only; caller handles multi-field lines via split helper
-            pass
-
-    multi_fields = re.findall(
-        r"([A-Za-zА-Яа-яЁё0-9 №()/\-]+):\s*([^:]+?)(?=\s{2,}[A-Za-zА-Яа-яЁё0-9 №()/\-]+:|$)",
-        stripped,
-    )
-    if len(multi_fields) > 1:
-        label, value = multi_fields[0]
-        return ("Поле", label.strip(), clean_value(value), "")
+            return ("Поле", label_match.group(1).strip(), value, "", "")
 
     colon_match = re.match(r"^(.+?):\s*(.*)$", stripped)
     if colon_match:
         label = colon_match.group(1).strip()
-        value = clean_value(colon_match.group(2))
+        value_raw = colon_match.group(2).strip()
         if label.startswith("КАРТОЧКА АППАРАТА №"):
             inventory = label.replace("КАРТОЧКА АППАРАТА №", "").strip()
             if inventory:
-                return ("Поле", "КАРТОЧКА АППАРАТА №", inventory, "")
-        if label.startswith("Приоритет") or label.startswith("Срок"):
-            return ("Поле", label, value, "")
-        return ("Поле", label, value, "")
+                return ("Поле", "КАРТОЧКА АППАРАТА №", inventory, "", "")
+        value, unit = split_counter_value(value_raw)
+        return ("Поле", label, value, unit, "")
 
     if stripped.startswith("ПОДПИСИ") or stripped.startswith("Антон:") or stripped.startswith("Проверил:"):
-        return ("Подпись", stripped, "", "")
+        return ("Подпись", stripped, "", "", "")
 
     if stripped.startswith("Комментарий") or stripped.startswith("Краткое описание"):
-        return ("Поле", stripped, "", "")
+        return ("Поле", stripped, "", "", "")
 
     if set(stripped) <= {"_"}:
-        return ("", "", "", "")
+        return ("", "", "", "", "")
 
-    return ("Текст", stripped, "", "")
+    return ("Текст", stripped, "", "", "")
+
+
+def split_counter_value(value_raw: str) -> tuple[str, str]:
+    text = clean_value(value_raw)
+    if not text:
+        unit_match = re.search(r"(стр\.|шт\.)", value_raw)
+        return "", unit_match.group(1) if unit_match else ""
+
+    match = re.match(r"^([\d\s]+)\s*(стр\.|шт\.)?$", text)
+    if match:
+        return match.group(1).replace(" ", ""), match.group(2) or ""
+
+    match = re.match(r"^(\d+)\s*(стр\.|шт\.)$", text)
+    if match:
+        return match.group(1), match.group(2)
+
+    # value with trailing unit attached
+    parts = text.rsplit(" ", 1)
+    if len(parts) == 2 and parts[1] in {"стр.", "шт."}:
+        return parts[0], parts[1]
+
+    return text, ""
 
 
 def clean_value(value: str) -> str:
@@ -264,14 +276,14 @@ def clean_value(value: str) -> str:
     return text.strip()
 
 
-def expand_line_rows(line: str) -> list[tuple[str, str, str, str]]:
+def expand_line_rows(line: str) -> list[tuple[str, str, str, str, str]]:
     stripped = line.strip()
     if "Дата:" in stripped and "Инженер:" in stripped:
-        rows: list[tuple[str, str, str, str]] = []
+        rows: list[tuple[str, str, str, str, str]] = []
         for label in ("Дата", "Инженер"):
             match = re.search(rf"{label}:\s*([^:]+?)(?=\s+(?:Дата|Инженер):|$)", stripped)
             if match:
-                rows.append(("Поле", label, clean_value(match.group(1)), ""))
+                rows.append(("Поле", label, clean_value(match.group(1)), "", ""))
         if rows:
             return rows
 
@@ -280,9 +292,9 @@ def expand_line_rows(line: str) -> list[tuple[str, str, str, str]]:
         inv_match = re.search(r"КАРТОЧКА АППАРАТА №\s*(\S+)", stripped)
         date_match = re.search(r"Дата:\s*(\S+)", stripped)
         if inv_match:
-            rows.append(("Поле", "КАРТОЧКА АППАРАТА №", inv_match.group(1), ""))
+            rows.append(("Поле", "КАРТОЧКА АППАРАТА №", inv_match.group(1), "", ""))
         if date_match:
-            rows.append(("Поле", "Дата", date_match.group(1), ""))
+            rows.append(("Поле", "Дата", date_match.group(1), "", ""))
         if rows:
             return rows
 
@@ -297,12 +309,12 @@ def rendered_text_to_dataframe(rendered_text: str) -> pd.DataFrame:
         stripped = line.strip()
 
         if pending_location and line.startswith("   ") and stripped and not stripped.startswith("["):
-            rows.append({"Тип": "Поле", "Поле": "Локация дня", "Значение": stripped, "Отметка": ""})
+            rows.append({"Тип": "Поле", "Поле": "Локация дня", "Значение": stripped, "Ед.": "", "Отметка": ""})
             pending_location = False
             continue
 
-        for row_type, field, value, mark in expand_line_rows(line):
-            if not any([row_type, field, value, mark]):
+        for row_type, field, value, unit, mark in expand_line_rows(line):
+            if not any([row_type, field, value, unit, mark]):
                 continue
             if row_type == "Раздел" and "ЛОКАЦИЯ ДНЯ" in field.upper():
                 pending_location = True
@@ -313,14 +325,15 @@ def rendered_text_to_dataframe(rendered_text: str) -> pd.DataFrame:
                     "Тип": row_type,
                     "Поле": field,
                     "Значение": value,
+                    "Ед.": unit,
                     "Отметка": mark,
                 }
             )
 
     if not rows:
-        rows.append({"Тип": "", "Поле": "", "Значение": "", "Отметка": ""})
+        rows.append({"Тип": "", "Поле": "", "Значение": "", "Ед.": "", "Отметка": ""})
 
-    return pd.DataFrame(rows, columns=["Тип", "Поле", "Значение", "Отметка"]).fillna("")
+    return pd.DataFrame(rows, columns=["Тип", "Поле", "Значение", "Ед.", "Отметка"]).fillna("")
 
 
 def write_template_document(output_path: Path, sheet_name: str, rendered_text: str) -> Path:
@@ -331,10 +344,11 @@ def write_template_document(output_path: Path, sheet_name: str, rendered_text: s
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         frame.to_excel(writer, sheet_name=sheet_name[:31], index=False)
         worksheet = writer.sheets[sheet_name[:31]]
-        worksheet.column_dimensions["A"].width = 14
-        worksheet.column_dimensions["B"].width = 48
-        worksheet.column_dimensions["C"].width = 28
-        worksheet.column_dimensions["D"].width = 14
+        worksheet.column_dimensions["A"].width = 12
+        worksheet.column_dimensions["B"].width = 52
+        worksheet.column_dimensions["C"].width = 16
+        worksheet.column_dimensions["D"].width = 8
+        worksheet.column_dimensions["E"].width = 18
 
     validate_xlsx(output_path)
     return output_path
@@ -349,10 +363,11 @@ def write_template_bundle(output_path: Path, documents: dict[str, str]) -> Path:
             safe_name = sheet_name[:31]
             frame.to_excel(writer, sheet_name=safe_name, index=False)
             worksheet = writer.sheets[safe_name]
-            worksheet.column_dimensions["A"].width = 14
-            worksheet.column_dimensions["B"].width = 48
-            worksheet.column_dimensions["C"].width = 28
-            worksheet.column_dimensions["D"].width = 14
+            worksheet.column_dimensions["A"].width = 12
+            worksheet.column_dimensions["B"].width = 52
+            worksheet.column_dimensions["C"].width = 16
+            worksheet.column_dimensions["D"].width = 8
+            worksheet.column_dimensions["E"].width = 18
 
     validate_xlsx(output_path)
     return output_path
