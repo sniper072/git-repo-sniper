@@ -13,6 +13,20 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+import sys
+
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from template_engine import (
+    find_template,
+    load_template,
+    render_template,
+    write_template_bundle,
+    write_template_document,
+)
+
 # Column aliases for auto-detection (Russian + English)
 COLUMN_ALIASES = {
     "model": ["марка", "модель", "model", "наименование", "тип", "устройство", "оборудован"],
@@ -304,28 +318,42 @@ def write_label_value_block(ws, start_row: int, fields: list[tuple[str, str]], l
     return row
 
 
-def write_device_card(output_path: Path, device: pd.Series) -> list[Path]:
-    frame = device_card_dataframe(device)
-    save_workbook(output_path, {"Card": frame})
-    csv_path = save_csv(output_path.with_suffix(".csv"), frame)
-    return [output_path, csv_path]
+def write_device_card(output_path: Path, device: pd.Series, template_dir: Path) -> list[Path]:
+    template = load_template(find_template("card", template_dir))
+    rendered = render_template(template, device)
+    write_template_document(output_path, "Card", rendered)
+    txt_path = output_path.with_suffix(".txt")
+    txt_path.write_text(rendered, encoding="utf-8")
+    return [output_path, txt_path]
 
 
-def write_device_checklist(output_path: Path, device: pd.Series) -> list[Path]:
-    frame = device_checklist_dataframe(device)
-    save_workbook(output_path, {"Checklist": frame})
-    csv_path = save_csv(output_path.with_suffix(".csv"), frame)
-    return [output_path, csv_path]
+def write_device_checklist(output_path: Path, device: pd.Series, template_dir: Path) -> list[Path]:
+    template = load_template(find_template("checklist", template_dir))
+    rendered = render_template(template, device)
+    write_template_document(output_path, "Checklist", rendered)
+    txt_path = output_path.with_suffix(".txt")
+    txt_path.write_text(rendered, encoding="utf-8")
+    return [output_path, txt_path]
 
 
-def write_device_sample_bundle(output_path: Path, device: pd.Series) -> Path:
-    save_workbook(
-        output_path,
-        {
-            "Card": device_card_dataframe(device),
-            "Checklist": device_checklist_dataframe(device),
-        },
-    )
+def write_device_daily_report(output_path: Path, device: pd.Series, template_dir: Path) -> list[Path]:
+    template = load_template(find_template("daily_report", template_dir))
+    rendered = render_template(template, device)
+    write_template_document(output_path, "DailyReport", rendered)
+    txt_path = output_path.with_suffix(".txt")
+    txt_path.write_text(rendered, encoding="utf-8")
+    return [output_path, txt_path]
+
+
+def write_device_sample_bundle(
+    output_path: Path, device: pd.Series, template_dir: Path
+) -> Path:
+    documents = {
+        "Card": render_template(load_template(find_template("card", template_dir)), device),
+        "Checklist": render_template(load_template(find_template("checklist", template_dir)), device),
+        "DailyReport": render_template(load_template(find_template("daily_report", template_dir)), device),
+    }
+    write_template_bundle(output_path, documents)
     return output_path
 
 
@@ -344,9 +372,11 @@ def write_open_me_first(output_path: Path) -> Path:
 def generate_device_documents(
     xlsx_path: Path,
     output_dir: Path,
+    template_dir: Path,
     *,
     cards: bool = True,
     checklists: bool = True,
+    daily_reports: bool = True,
     test_only: bool = False,
     filename_prefix: str = "",
 ) -> list[Path]:
@@ -354,6 +384,7 @@ def generate_device_documents(
     created: list[Path] = []
     cards_dir = output_dir / "device-cards"
     checklists_dir = output_dir / "checklists"
+    daily_dir = output_dir / "daily-reports"
 
     if test_only:
         created.append(write_open_me_first(output_dir / f"{filename_prefix}Open_Me_First.xlsx"))
@@ -368,14 +399,17 @@ def generate_device_documents(
             slug = device_slug(device)
             if cards:
                 card_path = cards_dir / f"{filename_prefix}Card_{slug}.xlsx"
-                created.extend(write_device_card(card_path, device))
+                created.extend(write_device_card(card_path, device, template_dir))
             if checklists:
                 checklist_path = checklists_dir / f"{filename_prefix}Checklist_{slug}.xlsx"
-                created.extend(write_device_checklist(checklist_path, device))
+                created.extend(write_device_checklist(checklist_path, device, template_dir))
+            if daily_reports:
+                daily_path = daily_dir / f"{filename_prefix}DailyReport_{slug}.xlsx"
+                created.extend(write_device_daily_report(daily_path, device, template_dir))
 
         if test_only and devices:
             bundle_path = output_dir / f"{filename_prefix}Sample_Device_Package.xlsx"
-            write_device_sample_bundle(bundle_path, devices[0])
+            write_device_sample_bundle(bundle_path, devices[0], template_dir)
             created.append(bundle_path)
             break
 
@@ -654,7 +688,13 @@ def main() -> None:
     parser.add_argument(
         "--device-all",
         action="store_true",
-        help="Generate inventory cards and checklists for all devices",
+        help="Generate inventory cards, checklists, and daily reports for all devices",
+    )
+    parser.add_argument(
+        "--templates-dir",
+        type=Path,
+        default=Path("equipment-templates/input/templates"),
+        help="Directory with Etagi txt templates",
     )
     args = parser.parse_args()
 
@@ -698,6 +738,7 @@ def main() -> None:
         created = generate_device_documents(
             source_xlsx,
             args.output_dir,
+            args.templates_dir,
             test_only=args.device_test,
             filename_prefix="TEST_" if args.device_test else "",
         )
