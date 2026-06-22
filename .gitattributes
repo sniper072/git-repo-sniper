@@ -1,0 +1,3 @@
+*.xlsx binary
+*.xls binary
+*.csv text working-tree-encoding=UTF-8
