@@ -201,11 +201,7 @@ def parse_rendered_line(line: str) -> tuple[str, str, str, str, str]:
 
     checkbox_match = re.match(r"^(\[\s*\]|\[.\]|□)\s*(.+)$", stripped)
     if checkbox_match:
-        text = checkbox_match.group(2).strip()
-        extra_value = ""
-        if "_____" in text:
-            extra_value = re.sub(r".*_____\s*", "", text).strip() if "_____" in text else ""
-        return ("Проверка", text, extra_value, "", "☐")
+        return ("Проверка", checkbox_match.group(2).strip(), "", "", "☐")
 
     rating_match = re.match(r"^(.+?):\s*((?:\[\s*\d\s*\]\s*)+)$", stripped)
     if rating_match:
