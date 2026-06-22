@@ -693,8 +693,8 @@ def main() -> None:
     parser.add_argument(
         "--templates-dir",
         type=Path,
-        default=Path("equipment-templates/input/templates"),
-        help="Directory with Etagi txt templates",
+        default=Path("equipment-templates/input"),
+        help="Directory with Etagi txt templates (also searches input/templates/)",
     )
     args = parser.parse_args()
 
