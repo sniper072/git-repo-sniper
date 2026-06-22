@@ -9,7 +9,8 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
-from openpyxl import Workbook
+import xlsxwriter
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -147,9 +148,39 @@ def iter_devices(df: pd.DataFrame) -> list[pd.Series]:
 
 
 def device_slug(device: pd.Series) -> str:
-    inventory = sanitize_filename(str(device.get("inventory", "") or "no-inv"))
+    inventory = sanitize_filename(str(device.get("inventory", "") or "no-inv")).replace("+", "plus")
     serial = sanitize_filename(str(device.get("serial", "") or "no-serial"))
+    inventory = re.sub(r"[^\w\-]+", "_", inventory)
+    serial = re.sub(r"[^\w\-]+", "_", serial)
     return f"{inventory}_{serial}"
+
+
+def safe_text(value: object) -> str:
+    text = str(value or "").strip()
+    return text if text else "-"
+
+
+def validate_xlsx(path: Path) -> None:
+    workbook = load_workbook(path, read_only=True)
+    workbook.close()
+
+
+def xlsx_formats(workbook: xlsxwriter.Workbook) -> dict:
+    return {
+        "title": workbook.add_format(
+            {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#D9E1F2", "border": 1}
+        ),
+        "label": workbook.add_format(
+            {"bold": True, "bg_color": "#BDD7EE", "border": 1, "valign": "vcenter", "text_wrap": True}
+        ),
+        "value": workbook.add_format({"border": 1, "text_wrap": True, "valign": "vcenter"}),
+        "header": workbook.add_format(
+            {"bold": True, "bg_color": "#BDD7EE", "border": 1, "align": "center", "valign": "vcenter", "text_wrap": True}
+        ),
+        "cell": workbook.add_format({"border": 1, "valign": "vcenter", "text_wrap": True}),
+        "center": workbook.add_format({"border": 1, "align": "center", "valign": "vcenter"}),
+        "footer": workbook.add_format({"border": 1, "valign": "vcenter"}),
+    }
 
 
 CHECKLIST_ITEMS = [
@@ -184,107 +215,143 @@ def write_label_value_block(ws, start_row: int, fields: list[tuple[str, str]], l
 
 
 def write_device_card(output_path: Path, device: pd.Series) -> None:
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Карточка"
-    ws.column_dimensions["A"].width = 24
-    ws.column_dimensions["B"].width = 18
-    ws.column_dimensions["C"].width = 18
-    ws.column_dimensions["D"].width = 18
-    ws.column_dimensions["E"].width = 18
-    ws.column_dimensions["F"].width = 18
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    workbook = xlsxwriter.Workbook(str(output_path), {"strings_to_urls": False})
+    worksheet = workbook.add_worksheet("Card")
+    formats = xlsx_formats(workbook)
 
-    row = 1
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
-    title = ws.cell(row=row, column=1, value="ИНВЕНТАРНАЯ КАРТОЧКА ОРГТЕХНИКИ")
-    style_cell(title, bold=True, fill=HEADER_FILL)
-    title.alignment = Alignment(horizontal="center", vertical="center")
+    worksheet.set_column("A:A", 30)
+    worksheet.set_column("B:D", 24)
 
-    row += 2
+    worksheet.merge_range(0, 0, 0, 3, "ИНВЕНТАРНАЯ КАРТОЧКА ОРГТЕХНИКИ", formats["title"])
+
     fields = [
         ("Дата составления:", date.today().strftime("%d.%m.%Y")),
-        ("№ п/п:", str(device.get("row_number", "") or "—")),
-        ("Инвентарный номер:", str(device.get("inventory", "") or "—")),
-        ("Марка / модель:", str(device.get("model", "") or "—")),
-        ("Серийный номер:", str(device.get("serial", "") or "—")),
-        ("Место размещения:", str(device.get("location", "") or "—")),
-        ("Офис:", str(device.get("office", "") or "—")),
-        ("Подразделение:", str(device.get("unit", "") or "—")),
-        ("Счетчик (предыдущий месяц):", str(device.get("prev_counter", "") or "—")),
-        ("Счетчик (отчетный месяц):", str(device.get("report_counter", "") or "—")),
-        ("Кол-во отпечатков:", str(device.get("print_count", "") or "—")),
-        ("Ответственный:", str(device.get("employee", "") or "—")),
+        ("№ п/п:", safe_text(device.get("row_number", ""))),
+        ("Инвентарный номер:", safe_text(device.get("inventory", ""))),
+        ("Марка / модель:", safe_text(device.get("model", ""))),
+        ("Серийный номер:", safe_text(device.get("serial", ""))),
+        ("Место размещения:", safe_text(device.get("location", ""))),
+        ("Офис:", safe_text(device.get("office", ""))),
+        ("Подразделение:", safe_text(device.get("unit", ""))),
+        ("Счетчик (предыдущий месяц):", safe_text(device.get("prev_counter", ""))),
+        ("Счетчик (отчетный месяц):", safe_text(device.get("report_counter", ""))),
+        ("Кол-во отпечатков:", safe_text(device.get("print_count", ""))),
+        ("Ответственный:", safe_text(device.get("employee", ""))),
         ("Состояние:", "Исправно / Неисправно / __________________"),
         ("Примечание:", ""),
     ]
-    row = write_label_value_block(ws, row, fields)
 
-    row += 1
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
-    ws.cell(row=row, column=1, value="Материально ответственное лицо: __________________ / __________________")
-    style_cell(ws.cell(row=row, column=1))
-    ws.merge_cells(start_row=row, start_column=4, end_row=row, end_column=6)
-    ws.cell(row=row, column=4, value="Инвентаризатор: __________________ / __________________")
-    style_cell(ws.cell(row=row, column=4))
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    wb.save(output_path)
-
-
-def write_device_checklist(output_path: Path, device: pd.Series) -> None:
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Чек-лист"
-    ws.column_dimensions["A"].width = 6
-    ws.column_dimensions["B"].width = 42
-    ws.column_dimensions["C"].width = 12
-    ws.column_dimensions["D"].width = 22
-    ws.column_dimensions["E"].width = 24
-
-    row = 1
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=5)
-    title = ws.cell(row=row, column=1, value="ЧЕК-ЛИСТ ПРОВЕРКИ ОРГТЕХНИКИ")
-    style_cell(title, bold=True, fill=HEADER_FILL)
-    title.alignment = Alignment(horizontal="center", vertical="center")
-
-    row += 2
-    header_fields = [
-        ("Инвентарный номер:", str(device.get("inventory", "") or "—")),
-        ("Модель:", str(device.get("model", "") or "—")),
-        ("Серийный номер:", str(device.get("serial", "") or "—")),
-        ("Местоположение:", str(device.get("location", "") or "—")),
-        ("Дата проверки:", date.today().strftime("%d.%m.%Y")),
-    ]
-    row = write_label_value_block(ws, row, header_fields, label_width=1, value_width=4)
-
-    row += 1
-    headers = ["№", "Пункт проверки", "Да / Нет", "Фактическое значение", "Примечание"]
-    for col_idx, header in enumerate(headers, start=1):
-        cell = ws.cell(row=row, column=col_idx, value=header)
-        style_cell(cell, bold=True, fill=TABLE_HEADER_FILL)
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
-    row += 1
-    for index, (label, field_key) in enumerate(CHECKLIST_ITEMS, start=1):
-        fact = str(device.get(field_key, "") or "") if field_key else ""
-        values = [index, label, "", fact, ""]
-        for col_idx, value in enumerate(values, start=1):
-            cell = ws.cell(row=row, column=col_idx, value=value)
-            style_cell(cell, wrap=True)
-            if col_idx in {1, 3}:
-                cell.alignment = Alignment(horizontal="center", vertical="center")
+    row = 2
+    for label, value in fields:
+        worksheet.write(row, 0, label, formats["label"])
+        worksheet.merge_range(row, 1, row, 3, value, formats["value"])
         row += 1
 
     row += 1
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=2)
-    ws.cell(row=row, column=1, value="Проверил: __________________ / __________________")
-    style_cell(ws.cell(row=row, column=1))
-    ws.merge_cells(start_row=row, start_column=4, end_row=row, end_column=5)
-    ws.cell(row=row, column=4, value="Подпись ответственного: __________________")
-    style_cell(ws.cell(row=row, column=4))
+    worksheet.merge_range(
+        row,
+        0,
+        row,
+        1,
+        "Материально ответственное лицо: __________________ / __________________",
+        formats["footer"],
+    )
+    worksheet.merge_range(
+        row,
+        2,
+        row,
+        3,
+        "Инвентаризатор: __________________ / __________________",
+        formats["footer"],
+    )
 
+    workbook.close()
+    validate_xlsx(output_path)
+
+
+def write_device_checklist(output_path: Path, device: pd.Series) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    wb.save(output_path)
+    workbook = xlsxwriter.Workbook(str(output_path), {"strings_to_urls": False})
+    worksheet = workbook.add_worksheet("Checklist")
+    formats = xlsx_formats(workbook)
+
+    worksheet.set_column("A:A", 6)
+    worksheet.set_column("B:B", 42)
+    worksheet.set_column("C:C", 12)
+    worksheet.set_column("D:D", 22)
+    worksheet.set_column("E:E", 24)
+
+    worksheet.merge_range(0, 0, 0, 4, "ЧЕК-ЛИСТ ПРОВЕРКИ ОРГТЕХНИКИ", formats["title"])
+
+    header_fields = [
+        ("Инвентарный номер:", safe_text(device.get("inventory", ""))),
+        ("Модель:", safe_text(device.get("model", ""))),
+        ("Серийный номер:", safe_text(device.get("serial", ""))),
+        ("Местоположение:", safe_text(device.get("location", ""))),
+        ("Дата проверки:", date.today().strftime("%d.%m.%Y")),
+    ]
+
+    row = 2
+    for label, value in header_fields:
+        worksheet.write(row, 0, label, formats["label"])
+        worksheet.merge_range(row, 1, row, 4, value, formats["value"])
+        row += 1
+
+    row += 1
+    headers = ["№", "Пункт проверки", "Да / Нет", "Фактическое значение", "Примечание"]
+    for col_idx, header in enumerate(headers):
+        worksheet.write(row, col_idx, header, formats["header"])
+
+    row += 1
+    for index, (label, field_key) in enumerate(CHECKLIST_ITEMS, start=1):
+        fact = safe_text(device.get(field_key, "")) if field_key else ""
+        worksheet.write(row, 0, index, formats["center"])
+        worksheet.write(row, 1, label, formats["cell"])
+        worksheet.write(row, 2, "", formats["center"])
+        worksheet.write(row, 3, fact if fact != "-" else "", formats["cell"])
+        worksheet.write(row, 4, "", formats["cell"])
+        row += 1
+
+    row += 1
+    worksheet.merge_range(row, 0, row, 1, "Проверил: __________________ / __________________", formats["footer"])
+    worksheet.merge_range(row, 3, row, 4, "Подпись ответственного: __________________", formats["footer"])
+
+    workbook.close()
+    validate_xlsx(output_path)
+
+
+def write_device_sample_bundle(output_path: Path, device: pd.Series) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    workbook = xlsxwriter.Workbook(str(output_path), {"strings_to_urls": False})
+
+    card_ws = workbook.add_worksheet("Card")
+    checklist_ws = workbook.add_worksheet("Checklist")
+    formats = xlsx_formats(workbook)
+
+    card_ws.merge_range(0, 0, 0, 3, "ИНВЕНТАРНАЯ КАРТОЧКА ОРГТЕХНИКИ", formats["title"])
+    card_ws.write(2, 0, "Инвентарный номер:", formats["label"])
+    card_ws.merge_range(2, 1, 2, 3, safe_text(device.get("inventory", "")), formats["value"])
+    card_ws.write(3, 0, "Модель:", formats["label"])
+    card_ws.merge_range(3, 1, 3, 3, safe_text(device.get("model", "")), formats["value"])
+    card_ws.write(4, 0, "Серийный номер:", formats["label"])
+    card_ws.merge_range(4, 1, 4, 3, safe_text(device.get("serial", "")), formats["value"])
+    card_ws.write(5, 0, "Местоположение:", formats["label"])
+    card_ws.merge_range(5, 1, 5, 3, safe_text(device.get("location", "")), formats["value"])
+
+    checklist_ws.merge_range(0, 0, 0, 4, "ЧЕК-ЛИСТ ПРОВЕРКИ ОРГТЕХНИКИ", formats["title"])
+    checklist_ws.write_row(2, 0, ["№", "Пункт проверки", "Да / Нет", "Фактическое значение", "Примечание"], formats["header"])
+    for index, (label, field_key) in enumerate(CHECKLIST_ITEMS[:5], start=1):
+        row = index + 2
+        fact = safe_text(device.get(field_key, "")) if field_key else ""
+        checklist_ws.write(row, 0, index, formats["center"])
+        checklist_ws.write(row, 1, label, formats["cell"])
+        checklist_ws.write(row, 2, "", formats["center"])
+        checklist_ws.write(row, 3, fact if fact != "-" else "", formats["cell"])
+        checklist_ws.write(row, 4, "", formats["cell"])
+
+    workbook.close()
+    validate_xlsx(output_path)
 
 
 def generate_device_documents(
@@ -310,15 +377,18 @@ def generate_device_documents(
         for device in devices:
             slug = device_slug(device)
             if cards:
-                card_path = cards_dir / f"{filename_prefix}Карточка_{slug}.xlsx"
+                card_path = cards_dir / f"{filename_prefix}Card_{slug}.xlsx"
                 write_device_card(card_path, device)
                 created.append(card_path)
             if checklists:
-                checklist_path = checklists_dir / f"{filename_prefix}Чеклист_{slug}.xlsx"
+                checklist_path = checklists_dir / f"{filename_prefix}Checklist_{slug}.xlsx"
                 write_device_checklist(checklist_path, device)
                 created.append(checklist_path)
 
-        if test_only:
+        if test_only and devices:
+            bundle_path = output_dir / f"{filename_prefix}Sample_Device_Package.xlsx"
+            write_device_sample_bundle(bundle_path, devices[0])
+            created.append(bundle_path)
             break
 
     return created
