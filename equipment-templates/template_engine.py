@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pandas as pd
 from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.worksheet.datavalidation import DataValidation
 
 INPUT_DIR = Path("equipment-templates/input")
 TEMPLATE_DIR = INPUT_DIR / "templates"
@@ -18,6 +20,34 @@ TEMPLATE_FILES = {
     "checklist": ["Etagi_checklist_template.txt"],
     "daily_report": ["Etagi_daily_report.txt", "Etagi_ daily_report.txt"],
 }
+
+OUTPUT_COLUMNS = ["Поле", "Значение", "Ед.", "Отметка"]
+
+FILL_HEADER = PatternFill("solid", fgColor="2F5496")
+FILL_TITLE = PatternFill("solid", fgColor="1F3864")
+FILL_SECTION = PatternFill("solid", fgColor="D6E4F0")
+FILL_STEP = PatternFill("solid", fgColor="E2EFDA")
+FILL_LABEL = PatternFill("solid", fgColor="F2F2F2")
+FILL_AUTO = PatternFill("solid", fgColor="DDEBF7")
+FILL_INPUT = PatternFill("solid", fgColor="FFF2CC")
+FILL_MARK = PatternFill("solid", fgColor="FFE699")
+FILL_TEXT = PatternFill("solid", fgColor="FFFFFF")
+FILL_NOTE = PatternFill("solid", fgColor="EDEDED")
+
+FONT_HEADER = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+FONT_TITLE = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
+FONT_SECTION = Font(name="Calibri", size=11, bold=True, color="1F3864")
+FONT_STEP = Font(name="Calibri", size=10, bold=True, color="375623")
+FONT_LABEL = Font(name="Calibri", size=10, bold=True)
+FONT_BODY = Font(name="Calibri", size=10)
+FONT_HINT = Font(name="Calibri", size=9, italic=True, color="666666")
+
+THIN_BORDER = Border(
+    left=Side(style="thin", color="B4B4B4"),
+    right=Side(style="thin", color="B4B4B4"),
+    top=Side(style="thin", color="B4B4B4"),
+    bottom=Side(style="thin", color="B4B4B4"),
+)
 
 # Labels from Etagi templates -> device field keys
 UNDERSCORE_LABELS: list[tuple[str, str]] = [
@@ -333,7 +363,15 @@ def rendered_text_to_dataframe(rendered_text: str) -> pd.DataFrame:
         stripped = line.strip()
 
         if pending_location and line.startswith("   ") and stripped and not stripped.startswith("["):
-            rows.append({"Поле": "Локация дня", "Значение": stripped, "Ед.": "", "Отметка": ""})
+            rows.append(
+                {
+                    "Поле": "Локация дня",
+                    "Значение": stripped,
+                    "Ед.": "",
+                    "Отметка": "",
+                    "row_kind": "Поле",
+                }
+            )
             pending_location = False
             continue
 
@@ -350,43 +388,297 @@ def rendered_text_to_dataframe(rendered_text: str) -> pd.DataFrame:
                     "Значение": value,
                     "Ед.": unit,
                     "Отметка": mark,
+                    "row_kind": row_type,
                 }
             )
 
     if not rows:
-        rows.append({"Поле": "", "Значение": "", "Ед.": "", "Отметка": ""})
+        rows.append({"Поле": "", "Значение": "", "Ед.": "", "Отметка": "", "row_kind": ""})
 
-    return pd.DataFrame(rows, columns=["Поле", "Значение", "Ед.", "Отметка"]).fillna("")
+    return pd.DataFrame(rows, columns=[*OUTPUT_COLUMNS, "row_kind"]).fillna("")
+
+
+def output_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    return frame[OUTPUT_COLUMNS].astype(str).replace("nan", "")
+
+
+def is_title_row(field: str, kind: str, row_index: int) -> bool:
+    upper = field.upper()
+    if row_index == 0 and kind in {"Раздел", "Текст"}:
+        return any(token in upper for token in ("КАРТОЧКА", "ЧЕК-ЛИСТ", "ЕЖЕДНЕВНЫЙ", "ОТЧЕТ"))
+    return False
+
+
+def set_cell_style(
+    cell,
+    *,
+    font: Font | None = None,
+    fill: PatternFill | None = None,
+    alignment: Alignment | None = None,
+    border: Border | None = THIN_BORDER,
+) -> None:
+    if font is not None:
+        cell.font = font
+    if fill is not None:
+        cell.fill = fill
+    if alignment is not None:
+        cell.alignment = alignment
+    if border is not None:
+        cell.border = border
+
+
+def apply_form_layout(worksheet, frame: pd.DataFrame) -> None:
+    """Apply entry-friendly Excel layout: colors, merges, validation, freeze panes."""
+    data = frame.fillna("")
+    last_col = len(OUTPUT_COLUMNS)
+
+    worksheet.sheet_view.showGridLines = False
+    worksheet.column_dimensions["A"].width = 46
+    worksheet.column_dimensions["B"].width = 24
+    worksheet.column_dimensions["C"].width = 7
+    worksheet.column_dimensions["D"].width = 16
+
+    # Header row
+    headers = ["Поле", "Значение", "Ед.", "Отметка ✓/✗"]
+    for col_idx, header in enumerate(headers, start=1):
+        cell = worksheet.cell(row=1, column=col_idx, value=header)
+        set_cell_style(
+            cell,
+            font=FONT_HEADER,
+            fill=FILL_HEADER,
+            alignment=Alignment(horizontal="center", vertical="center", wrap_text=True),
+        )
+    worksheet.row_dimensions[1].height = 24
+
+    # Legend row
+    worksheet.merge_cells(start_row=2, start_column=1, end_row=2, end_column=last_col)
+    legend = worksheet.cell(
+        row=2,
+        column=1,
+        value="Жёлтые ячейки — ввод вручную  |  Голубые — из базы  |  Колонка «Отметка» — ✓ / ✗ / 1-5",
+    )
+    set_cell_style(
+        legend,
+        font=FONT_HINT,
+        fill=FILL_NOTE,
+        alignment=Alignment(horizontal="left", vertical="center", wrap_text=True),
+        border=None,
+    )
+    worksheet.row_dimensions[2].height = 18
+
+    mark_rows: list[int] = []
+    rating_rows: list[int] = []
+    start_data_row = 3
+
+    for offset, row in enumerate(data.itertuples(index=False)):
+        excel_row = start_data_row + offset
+        field = str(getattr(row, "Поле", "") or "")
+        value = str(getattr(row, "Значение", "") or "")
+        unit = str(getattr(row, "Ед.", "") or "")
+        mark = str(getattr(row, "Отметка", "") or "")
+        kind = str(getattr(row, "row_kind", "") or "")
+
+        if kind == "Поле" and field == "КАРТОЧКА АППАРАТА №" and value:
+            worksheet.merge_cells(start_row=excel_row, start_column=1, end_row=excel_row, end_column=last_col)
+            title_cell = worksheet.cell(row=excel_row, column=1, value=f"КАРТОЧКА АППАРАТА № {value}")
+            set_cell_style(
+                title_cell,
+                font=FONT_TITLE,
+                fill=FILL_TITLE,
+                alignment=Alignment(horizontal="center", vertical="center"),
+            )
+            worksheet.row_dimensions[excel_row].height = 28
+            continue
+
+        if is_title_row(field, kind, offset):
+            worksheet.merge_cells(start_row=excel_row, start_column=1, end_row=excel_row, end_column=last_col)
+            title_cell = worksheet.cell(row=excel_row, column=1, value=field)
+            set_cell_style(
+                title_cell,
+                font=FONT_TITLE,
+                fill=FILL_TITLE,
+                alignment=Alignment(horizontal="center", vertical="center", wrap_text=True),
+            )
+            worksheet.row_dimensions[excel_row].height = 28
+            continue
+
+        if kind == "Раздел" or (kind == "Текст" and field.isupper() and len(field) > 20):
+            worksheet.merge_cells(start_row=excel_row, start_column=1, end_row=excel_row, end_column=last_col)
+            section_cell = worksheet.cell(row=excel_row, column=1, value=field)
+            set_cell_style(
+                section_cell,
+                font=FONT_SECTION,
+                fill=FILL_SECTION,
+                alignment=Alignment(horizontal="left", vertical="center", wrap_text=True),
+            )
+            worksheet.row_dimensions[excel_row].height = 22
+            continue
+
+        if kind == "Шаг":
+            worksheet.merge_cells(start_row=excel_row, start_column=1, end_row=excel_row, end_column=last_col)
+            step_cell = worksheet.cell(row=excel_row, column=1, value=field)
+            set_cell_style(
+                step_cell,
+                font=FONT_STEP,
+                fill=FILL_STEP,
+                alignment=Alignment(horizontal="left", vertical="center", wrap_text=True),
+            )
+            worksheet.row_dimensions[excel_row].height = 20
+            continue
+
+        label_cell = worksheet.cell(row=excel_row, column=1, value=field)
+        value_cell = worksheet.cell(row=excel_row, column=2, value="" if value in {"", "nan"} else value)
+        unit_cell = worksheet.cell(row=excel_row, column=3, value="" if unit in {"", "nan"} else unit)
+        mark_cell = worksheet.cell(row=excel_row, column=4, value="" if mark in {"", "nan"} else mark)
+
+        set_cell_style(
+            label_cell,
+            font=FONT_LABEL if kind == "Поле" else FONT_BODY,
+            fill=FILL_LABEL if kind == "Поле" else FILL_TEXT,
+            alignment=Alignment(horizontal="left", vertical="top", wrap_text=True),
+        )
+        set_cell_style(
+            unit_cell,
+            font=FONT_BODY,
+            fill=FILL_NOTE,
+            alignment=Alignment(horizontal="center", vertical="center"),
+        )
+
+        if kind == "Проверка":
+            set_cell_style(
+                label_cell,
+                font=FONT_BODY,
+                fill=FILL_TEXT,
+                alignment=Alignment(horizontal="left", vertical="top", wrap_text=True, indent=1),
+            )
+            set_cell_style(
+                value_cell,
+                font=FONT_BODY,
+                fill=FILL_TEXT,
+                alignment=Alignment(horizontal="left", vertical="center"),
+            )
+            set_cell_style(
+                mark_cell,
+                font=FONT_BODY,
+                fill=FILL_MARK,
+                alignment=Alignment(horizontal="center", vertical="center"),
+            )
+            mark_rows.append(excel_row)
+            worksheet.row_dimensions[excel_row].height = max(20, min(48, 14 + len(field) // 50 * 6))
+            continue
+
+        if kind == "Оценка":
+            set_cell_style(
+                value_cell,
+                font=FONT_BODY,
+                fill=FILL_TEXT,
+                alignment=Alignment(horizontal="left", vertical="center"),
+            )
+            if mark and "[" in mark:
+                mark_cell.value = ""
+            set_cell_style(
+                mark_cell,
+                font=FONT_BODY,
+                fill=FILL_MARK,
+                alignment=Alignment(horizontal="center", vertical="center"),
+            )
+            rating_rows.append(excel_row)
+            worksheet.row_dimensions[excel_row].height = 20
+            continue
+
+        if kind == "Подпись":
+            worksheet.merge_cells(start_row=excel_row, start_column=1, end_row=excel_row, end_column=2)
+            worksheet.merge_cells(start_row=excel_row, start_column=3, end_row=excel_row, end_column=last_col)
+            set_cell_style(
+                label_cell,
+                font=FONT_LABEL,
+                fill=FILL_LABEL,
+                alignment=Alignment(horizontal="left", vertical="center"),
+            )
+            sign_cell = worksheet.cell(row=excel_row, column=3, value="подпись / дата")
+            set_cell_style(
+                sign_cell,
+                font=FONT_HINT,
+                fill=FILL_INPUT,
+                alignment=Alignment(horizontal="center", vertical="center"),
+            )
+            worksheet.row_dimensions[excel_row].height = 24
+            continue
+
+        value_empty = value in {"", "nan"}
+        is_counter = unit in {"стр.", "шт."}
+        is_comment = field.startswith("Комментарий") or field.startswith("Краткое описание")
+
+        if is_comment or (kind == "Текст" and not value):
+            worksheet.merge_cells(start_row=excel_row, start_column=2, end_row=excel_row, end_column=last_col)
+            set_cell_style(
+                value_cell,
+                font=FONT_BODY,
+                fill=FILL_INPUT,
+                alignment=Alignment(horizontal="left", vertical="top", wrap_text=True),
+            )
+            worksheet.row_dimensions[excel_row].height = 28
+            continue
+
+        value_fill = FILL_INPUT if value_empty or is_counter else FILL_AUTO
+        set_cell_style(
+            value_cell,
+            font=FONT_BODY,
+            fill=value_fill,
+            alignment=Alignment(horizontal="left", vertical="center", wrap_text=True),
+        )
+        set_cell_style(
+            mark_cell,
+            font=FONT_BODY,
+            fill=FILL_TEXT,
+            alignment=Alignment(horizontal="center", vertical="center"),
+        )
+        worksheet.row_dimensions[excel_row].height = 20
+
+    if mark_rows:
+        mark_validation = DataValidation(
+            type="list",
+            formula1='"✓,✗,—"',
+            allow_blank=True,
+            showDropDown=False,
+        )
+        worksheet.add_data_validation(mark_validation)
+        for row_number in mark_rows:
+            mark_validation.add(f"D{row_number}")
+
+    if rating_rows:
+        rating_validation = DataValidation(
+            type="list",
+            formula1='"1,2,3,4,5"',
+            allow_blank=True,
+            showDropDown=False,
+        )
+        worksheet.add_data_validation(rating_validation)
+        for row_number in rating_rows:
+            rating_validation.add(f"D{row_number}")
+
+    worksheet.freeze_panes = "A3"
+    worksheet.print_title_rows = "1:2"
+    worksheet.page_setup.orientation = worksheet.ORIENTATION_PORTRAIT
+    worksheet.page_setup.fitToWidth = 1
+    worksheet.page_setup.fitToHeight = 0
+    worksheet.sheet_properties.pageSetUpPr.fitToPage = True
 
 
 def write_dataframe_xlsx(path: Path, sheet_name: str, frame: pd.DataFrame) -> None:
-    """Write dataframe with openpyxl only (no pandas ExcelWriter)."""
+    """Write dataframe with openpyxl and entry-friendly form layout."""
     path.parent.mkdir(parents=True, exist_ok=True)
     workbook = Workbook()
     worksheet = workbook.active
     worksheet.title = sheet_name[:31]
-
-    headers = list(frame.columns)
-    for column_index, header in enumerate(headers, start=1):
-        worksheet.cell(row=1, column=column_index, value=header)
-
-    for row_index, row in enumerate(frame.itertuples(index=False), start=2):
-        for column_index, value in enumerate(row, start=1):
-            cell_value = "" if value is None or str(value) in {"", "nan", "None"} else str(value)
-            worksheet.cell(row=row_index, column=column_index, value=cell_value)
-
-    worksheet.column_dimensions["A"].width = 56
-    worksheet.column_dimensions["B"].width = 18
-    worksheet.column_dimensions["C"].width = 8
-    worksheet.column_dimensions["D"].width = 22
-
+    apply_form_layout(worksheet, frame)
     workbook.save(path)
     validate_xlsx(path)
 
 
 def write_template_document(output_path: Path, sheet_name: str, rendered_text: str) -> Path:
     """Write template as columns: one value per cell for manual filling."""
-    frame = rendered_text_to_dataframe(rendered_text).astype(str).replace("nan", "")
+    frame = rendered_text_to_dataframe(rendered_text)
     write_dataframe_xlsx(output_path, sheet_name, frame)
     return output_path
 
@@ -397,23 +689,10 @@ def write_template_bundle(output_path: Path, documents: dict[str, str]) -> Path:
     workbook.remove(workbook.active)
 
     for sheet_name, rendered_text in documents.items():
-        frame = rendered_text_to_dataframe(rendered_text).astype(str).replace("nan", "")
+        frame = rendered_text_to_dataframe(rendered_text)
         safe_name = sheet_name[:31]
         worksheet = workbook.create_sheet(title=safe_name)
-
-        headers = list(frame.columns)
-        for column_index, header in enumerate(headers, start=1):
-            worksheet.cell(row=1, column=column_index, value=header)
-
-        for row_index, row in enumerate(frame.itertuples(index=False), start=2):
-            for column_index, value in enumerate(row, start=1):
-                cell_value = "" if value is None or str(value) in {"", "nan", "None"} else str(value)
-                worksheet.cell(row=row_index, column=column_index, value=cell_value)
-
-        worksheet.column_dimensions["A"].width = 56
-        worksheet.column_dimensions["B"].width = 18
-        worksheet.column_dimensions["C"].width = 8
-        worksheet.column_dimensions["D"].width = 22
+        apply_form_layout(worksheet, frame)
 
     workbook.save(output_path)
     validate_xlsx(output_path)
@@ -422,7 +701,7 @@ def write_template_bundle(output_path: Path, documents: dict[str, str]) -> Path:
 
 def write_csv(path: Path, frame: pd.DataFrame) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    frame.astype(str).replace("nan", "").to_csv(path, index=False, encoding="utf-8-sig")
+    output_frame(frame).to_csv(path, index=False, encoding="utf-8-sig")
     return path
 
 
@@ -482,10 +761,19 @@ def write_download_test_package(
         "  TEST_Card.xlsx\n"
         "  TEST_Checklist.xlsx\n"
         "  TEST_Daily_Report.xlsx\n\n"
-        "CSV copies are included if Excel does not open.\n",
+        "CSV copies are included if Excel does not open.\n\n"
+        "See LAYOUT_EXAMPLE.txt for color legend and entry workflow.\n",
         encoding="utf-8",
     )
     created.append(readme)
+
+    layout_guide = download_dir / "LAYOUT_EXAMPLE.txt"
+    if not layout_guide.exists():
+        layout_guide.write_text(
+            "See equipment-templates/output/download/LAYOUT_EXAMPLE.txt in repo.\n",
+            encoding="utf-8",
+        )
+    created.append(layout_guide)
 
     zip_path = download_dir / "TEST_Package.zip"
     create_zip(zip_path, created)

@@ -10,3 +10,5 @@ Single files in this folder:
   TEST_Daily_Report.xlsx
 
 CSV copies are included if Excel does not open.
+
+See LAYOUT_EXAMPLE.txt for color legend and entry workflow.

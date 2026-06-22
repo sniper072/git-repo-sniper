@@ -1,0 +1,39 @@
+EXCEL LAYOUT — MANUAL ENTRY GUIDE
+=================================
+
+Columns (row 1, dark blue header):
+  A: Поле          — label / question
+  B: Значение      — type data here
+  C: Ед.           — unit (стр., шт.)
+  D: Отметка ✓/✗   — checkbox answers or score 1-5
+
+Row 2 (gray legend):
+  Yellow = enter manually | Blue = filled from database | Mark column = ✓ / ✗ / 1-5
+
+Row types (by color):
+  ┌─────────────────────────────────────────────────────────────┐
+  │ DARK BLUE band     Document title (КАРТОЧКА / ЧЕК-ЛИСТ)     │
+  ├─────────────────────────────────────────────────────────────┤
+  │ LIGHT BLUE band    Section: "1. ИДЕНТИФИКАЦИЯ"              │
+  ├─────────────────────────────────────────────────────────────┤
+  │ GREEN band         Step: "ШАГ 1. ВНЕШНИЙ ОСМОТР"            │
+  ├──────────────┬──────────────┬─────┬────────────────────────┤
+  │ Gray label   │ BLUE value   │     │                        │  ← from xlsx (model, serial)
+  │ Gray label   │ YELLOW empty │     │                        │  ← manual: IP, cartridge
+  │ Gray label   │ YELLOW 272864│ стр.│                        │  ← counter entry
+  │ Question...  │              │     │ YELLOW (type ✓ or ✗)   │  ← checklist item
+  │ Rating label │              │     │ YELLOW (type 1-5)      │  ← score
+  └──────────────┴──────────────┴─────┴────────────────────────┘
+
+Efficient workflow for engineer on site:
+  1. Open TEST_All_In_One.xlsx (or single file)
+  2. Tab through YELLOW cells only (values + marks)
+  3. In column D type: ✓  or  ✗  or  —  (dash = not applicable)
+  4. For scores type: 1, 2, 3, 4, or 5
+  5. Blue cells are read-only reference from "Этажи покопийка AI.xlsx"
+
+Example device in TEST files:
+  Model:   Kyocera ECOSYS M3040dn
+  Serial:  LS67Y43279
+  Inv:     67+
+  Office:  Риелторы (Тюмень)
