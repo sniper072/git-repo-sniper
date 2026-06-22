@@ -182,41 +182,64 @@ def validate_xlsx(path: Path) -> None:
     workbook.close()
 
 
+def is_decorative_line(stripped: str) -> bool:
+    if not stripped:
+        return True
+    if re.fullmatch(r"[═─_\-]+", stripped):
+        return True
+    if stripped.startswith("┌") or stripped.startswith("└"):
+        return True
+    return False
+
+
+def strip_decorative_chars(text: str) -> str:
+    if not text:
+        return ""
+    cleaned = text.replace("☐", "").replace("□", "")
+    if cleaned.startswith("│") and cleaned.endswith("│"):
+        cleaned = cleaned[1:-1]
+    cleaned = cleaned.strip(" │═─-_")
+    return cleaned.strip()
+
+
 def parse_rendered_line(line: str) -> tuple[str, str, str, str, str]:
     """Split one template line into: type, field, value, unit, mark."""
     raw = line.rstrip()
     stripped = raw.strip()
 
-    if not stripped:
+    if not stripped or is_decorative_line(stripped):
         return ("", "", "", "", "")
 
-    if stripped.startswith("════") or stripped.startswith("────") or stripped.startswith("┌") or stripped.startswith("│") or stripped.startswith("└"):
-        return ("Заголовок", stripped, "", "", "")
+    if stripped.startswith("│") and stripped.endswith("│"):
+        title = strip_decorative_chars(stripped)
+        if title:
+            return ("Раздел", title, "", "", "")
+        return ("", "", "", "", "")
 
     if re.match(r"^\d+\.\s+", stripped):
-        return ("Раздел", stripped, "", "", "")
+        return ("Раздел", strip_decorative_chars(stripped), "", "", "")
 
     if re.match(r"^ШАГ\s+\d+", stripped, flags=re.IGNORECASE):
-        return ("Шаг", stripped, "", "", "")
+        return ("Шаг", strip_decorative_chars(stripped), "", "", "")
 
     checkbox_match = re.match(r"^(\[\s*\]|\[.\]|□)\s*(.+)$", stripped)
     if checkbox_match:
-        return ("Проверка", checkbox_match.group(2).strip(), "", "", "☐")
+        return ("Проверка", strip_decorative_chars(checkbox_match.group(2)), "", "", "")
 
     rating_match = re.match(r"^(.+?):\s*((?:\[\s*\d\s*\]\s*)+)$", stripped)
     if rating_match:
-        return ("Оценка", rating_match.group(1).strip(), "", "", rating_match.group(2).strip())
+        return ("Оценка", strip_decorative_chars(rating_match.group(1)), "", "", rating_match.group(2).strip())
 
     if "🟢" in stripped or "🟡" in stripped or "🔴" in stripped:
         label_match = re.match(r"^([🟢🟡🔴]\s*.+?:)\s*(.*)$", stripped)
         if label_match:
             value = label_match.group(2).strip()
             value = "" if re.fullmatch(r"_+\s*шт\.?", value) else value.replace("_", "").strip()
-            return ("Поле", label_match.group(1).strip(), value, "", "")
+            return ("Поле", strip_decorative_chars(label_match.group(1)), value, "", "")
 
     colon_match = re.match(r"^(.+?):\s*(.*)$", stripped)
     if colon_match:
-        label = colon_match.group(1).strip()
+        label = strip_decorative_chars(colon_match.group(1))
         value_raw = colon_match.group(2).strip()
         if label.startswith("КАРТОЧКА АППАРАТА №"):
             inventory = label.replace("КАРТОЧКА АППАРАТА №", "").strip()
@@ -226,15 +249,19 @@ def parse_rendered_line(line: str) -> tuple[str, str, str, str, str]:
         return ("Поле", label, value, unit, "")
 
     if stripped.startswith("ПОДПИСИ") or stripped.startswith("Антон:") or stripped.startswith("Проверил:"):
-        return ("Подпись", stripped, "", "", "")
+        return ("Подпись", strip_decorative_chars(stripped), "", "", "")
 
     if stripped.startswith("Комментарий") or stripped.startswith("Краткое описание"):
-        return ("Поле", stripped, "", "", "")
+        return ("Поле", strip_decorative_chars(stripped), "", "", "")
 
-    if set(stripped) <= {"_"}:
+    if set(stripped) <= {"_", "─", "═", "-"}:
         return ("", "", "", "", "")
 
-    return ("Текст", stripped, "", "", "")
+    cleaned = strip_decorative_chars(stripped)
+    if not cleaned or is_decorative_line(cleaned):
+        return ("", "", "", "", "")
+
+    return ("Текст", cleaned, "", "", "")
 
 
 def split_counter_value(value_raw: str) -> tuple[str, str]:
@@ -305,7 +332,7 @@ def rendered_text_to_dataframe(rendered_text: str) -> pd.DataFrame:
         stripped = line.strip()
 
         if pending_location and line.startswith("   ") and stripped and not stripped.startswith("["):
-            rows.append({"Тип": "Поле", "Поле": "Локация дня", "Значение": stripped, "Ед.": "", "Отметка": ""})
+            rows.append({"Поле": "Локация дня", "Значение": stripped, "Ед.": "", "Отметка": ""})
             pending_location = False
             continue
 
@@ -318,7 +345,6 @@ def rendered_text_to_dataframe(rendered_text: str) -> pd.DataFrame:
                 pending_location = False
             rows.append(
                 {
-                    "Тип": row_type,
                     "Поле": field,
                     "Значение": value,
                     "Ед.": unit,
@@ -327,9 +353,9 @@ def rendered_text_to_dataframe(rendered_text: str) -> pd.DataFrame:
             )
 
     if not rows:
-        rows.append({"Тип": "", "Поле": "", "Значение": "", "Ед.": "", "Отметка": ""})
+        rows.append({"Поле": "", "Значение": "", "Ед.": "", "Отметка": ""})
 
-    return pd.DataFrame(rows, columns=["Тип", "Поле", "Значение", "Ед.", "Отметка"]).fillna("")
+    return pd.DataFrame(rows, columns=["Поле", "Значение", "Ед.", "Отметка"]).fillna("")
 
 
 def write_template_document(output_path: Path, sheet_name: str, rendered_text: str) -> Path:
@@ -340,11 +366,10 @@ def write_template_document(output_path: Path, sheet_name: str, rendered_text: s
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         frame.to_excel(writer, sheet_name=sheet_name[:31], index=False)
         worksheet = writer.sheets[sheet_name[:31]]
-        worksheet.column_dimensions["A"].width = 12
-        worksheet.column_dimensions["B"].width = 52
-        worksheet.column_dimensions["C"].width = 16
-        worksheet.column_dimensions["D"].width = 8
-        worksheet.column_dimensions["E"].width = 18
+        worksheet.column_dimensions["A"].width = 56
+        worksheet.column_dimensions["B"].width = 18
+        worksheet.column_dimensions["C"].width = 8
+        worksheet.column_dimensions["D"].width = 22
 
     validate_xlsx(output_path)
     return output_path
@@ -359,11 +384,10 @@ def write_template_bundle(output_path: Path, documents: dict[str, str]) -> Path:
             safe_name = sheet_name[:31]
             frame.to_excel(writer, sheet_name=safe_name, index=False)
             worksheet = writer.sheets[safe_name]
-            worksheet.column_dimensions["A"].width = 12
-            worksheet.column_dimensions["B"].width = 52
-            worksheet.column_dimensions["C"].width = 16
-            worksheet.column_dimensions["D"].width = 8
-            worksheet.column_dimensions["E"].width = 18
+            worksheet.column_dimensions["A"].width = 56
+            worksheet.column_dimensions["B"].width = 18
+            worksheet.column_dimensions["C"].width = 8
+            worksheet.column_dimensions["D"].width = 22
 
     validate_xlsx(output_path)
     return output_path
