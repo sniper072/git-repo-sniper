@@ -23,6 +23,7 @@ from template_engine import (
     find_template,
     load_template,
     render_template,
+    write_download_test_package,
     write_template_bundle,
     write_template_document,
 )
@@ -411,6 +412,10 @@ def generate_device_documents(
             bundle_path = output_dir / f"{filename_prefix}Sample_Device_Package.xlsx"
             write_device_sample_bundle(bundle_path, devices[0], template_dir)
             created.append(bundle_path)
+
+            download_dir = output_dir / "download"
+            download_files = write_download_test_package(download_dir, devices[0], template_dir)
+            created.extend(download_files)
             break
 
     return created
@@ -746,6 +751,11 @@ def main() -> None:
             raise SystemExit("No device documents were generated.")
         for path in created:
             print(f"Created: {path}")
+        if args.device_test:
+            download_zip = args.output_dir / "download" / "TEST_Package.zip"
+            print("\nDownload from GitHub:")
+            print(f"  {download_zip}")
+            print("Or open: equipment-templates/output/download/TEST_All_In_One.xlsx")
         return
 
     sample_only = args.sample_only
