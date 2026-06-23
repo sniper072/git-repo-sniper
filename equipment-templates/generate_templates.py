@@ -161,12 +161,61 @@ def iter_devices(df: pd.DataFrame) -> list[pd.Series]:
     return devices
 
 
-def device_slug(device: pd.Series) -> str:
+def device_base_slug(device: pd.Series) -> str:
     inventory = sanitize_filename(str(device.get("inventory", "") or "no-inv")).replace("+", "plus")
     serial = sanitize_filename(str(device.get("serial", "") or "no-serial"))
     inventory = re.sub(r"[^\w\-]+", "_", inventory)
     serial = re.sub(r"[^\w\-]+", "_", serial)
     return f"{inventory}_{serial}"
+
+
+def model_variant_tag(model: object) -> str:
+    text = str(model or "").strip().lower().replace("ё", "е")
+    if re.search(r"ч\s*/\s*б|\bчб\b", text):
+        return "chb"
+    if re.search(r"ц\s*/\s*в|\bцв\b|цвет", text):
+        return "cv"
+    cleaned = sanitize_filename(str(model or ""))
+    cleaned = re.sub(r"[^\w\-]+", "_", cleaned).strip("_")
+    if cleaned:
+        return cleaned[-12:].lower()
+    return "variant"
+
+
+def assign_device_slugs(devices: list[pd.Series]) -> list[str]:
+    """Build unique filenames; add chb/cv suffix when inventory+serial repeat."""
+    bases = [device_base_slug(device) for device in devices]
+    base_counts: dict[str, int] = {}
+    for base in bases:
+        base_counts[base] = base_counts.get(base, 0) + 1
+
+    slugs: list[str] = []
+    used: set[str] = set()
+    base_seen: dict[str, int] = {}
+
+    for device, base in zip(devices, bases):
+        if base_counts[base] == 1:
+            slug = base
+        else:
+            tag = model_variant_tag(device.get("model", ""))
+            candidate = f"{base}_{tag}"
+            if candidate in used:
+                base_seen[base] = base_seen.get(base, 0) + 1
+                candidate = f"{base}_{tag}_{base_seen[base]}"
+            slug = candidate
+
+        if slug in used:
+            base_seen[base] = base_seen.get(base, 0) + 1
+            slug = f"{base}_v{base_seen[base]}"
+
+        used.add(slug)
+        slugs.append(slug)
+
+    return slugs
+
+
+def device_slug(device: pd.Series) -> str:
+    return device_base_slug(device)
 
 
 def safe_text(value: object) -> str:
@@ -396,8 +445,8 @@ def generate_device_documents(
         if test_only:
             devices = devices[:1]
 
-        for device in devices:
-            slug = device_slug(device)
+        slugs = assign_device_slugs(devices)
+        for device, slug in zip(devices, slugs):
             if cards:
                 card_path = cards_dir / f"{filename_prefix}Card_{slug}.xlsx"
                 created.extend(write_device_card(card_path, device, template_dir))
