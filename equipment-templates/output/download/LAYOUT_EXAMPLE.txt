@@ -1,0 +1,20 @@
+APPROVED LAYOUT: compact (4 columns)
+====================================
+
+Reference file: compare/COMPARE_device1_compact_Card.xlsx
+
+Columns:
+  Поле  |  Значение  |  Ед.  |  Отметка ✓/✗
+
+Color guide:
+  BLUE header     Column titles
+  DARK BLUE band  Document title
+  LIGHT BLUE      Section headers
+  GREEN band      Checklist steps
+  BLUE cell       Auto-filled from database
+  YELLOW cell     Manual input (gold border)
+  GOLD cell       Mark column — ✓ / ✗ / 1-5 (dropdown)
+
+Test device: Kyocera ECOSYS M3040dn, inv. 67+, serial LS67Y43279
+
+All TEST_*.xlsx files in this folder use the approved compact layout.

@@ -1,0 +1,6 @@
+Device 1 (Kyocera ECOSYS M3040dn) / compact: score=190 (inputs=55, numbered=0, strip=0)
+Device 1 (Kyocera ECOSYS M3040dn) / field: score=359 (inputs=55, numbered=16, strip=25)
+Device 2 (HP Color LaserJet Pro M454dn) / compact: score=188 (inputs=54, numbered=0, strip=0)
+Device 2 (HP Color LaserJet Pro M454dn) / field: score=357 (inputs=54, numbered=16, strip=25)
+
+TOTAL compact=378 field=716 → winner: field

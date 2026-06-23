@@ -10,3 +10,5 @@ Single files in this folder:
   TEST_Daily_Report.xlsx
 
 CSV copies are included if Excel does not open.
+
+Approved layout: compact (4 columns, see COMPARE_device1_compact_Card.xlsx).
