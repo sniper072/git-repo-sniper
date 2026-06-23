@@ -11,4 +11,4 @@ Single files in this folder:
 
 CSV copies are included if Excel does not open.
 
-See LAYOUT_EXAMPLE.txt for color legend and entry workflow.
+Approved layout: compact (4 columns, see COMPARE_device1_compact_Card.xlsx).

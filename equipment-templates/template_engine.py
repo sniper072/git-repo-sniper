@@ -65,7 +65,8 @@ MARK_BORDER = Border(
     bottom=Side(style="medium", color="C65911"),
 )
 
-DEFAULT_LAYOUT = "field"
+DEFAULT_LAYOUT = "compact"
+APPROVED_LAYOUT = "compact"
 
 # Labels from Etagi templates -> device field keys
 UNDERSCORE_LABELS: list[tuple[str, str]] = [
@@ -416,7 +417,9 @@ def rendered_text_to_dataframe(rendered_text: str) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=[*OUTPUT_COLUMNS, "row_kind"]).fillna("")
 
 
-def output_frame(frame: pd.DataFrame) -> pd.DataFrame:
+def output_frame(frame: pd.DataFrame, layout_mode: str = DEFAULT_LAYOUT) -> pd.DataFrame:
+    if layout_mode == "compact":
+        return frame[LEGACY_COLUMNS].astype(str).replace("nan", "")
     numbered = number_check_rows(frame)
     return numbered[OUTPUT_COLUMNS].astype(str).replace("nan", "")
 
@@ -927,9 +930,9 @@ def write_template_bundle(output_path: Path, documents: dict[str, str]) -> Path:
     return output_path
 
 
-def write_csv(path: Path, frame: pd.DataFrame) -> Path:
+def write_csv(path: Path, frame: pd.DataFrame, layout_mode: str = DEFAULT_LAYOUT) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    output_frame(frame).to_csv(path, index=False, encoding="utf-8-sig")
+    output_frame(frame, layout_mode).to_csv(path, index=False, encoding="utf-8-sig")
     return path
 
 
@@ -990,7 +993,7 @@ def write_download_test_package(
         "  TEST_Checklist.xlsx\n"
         "  TEST_Daily_Report.xlsx\n\n"
         "CSV copies are included if Excel does not open.\n\n"
-        "See LAYOUT_EXAMPLE.txt for color legend and entry workflow.\n",
+        "Approved layout: compact (4 columns, see COMPARE_device1_compact_Card.xlsx).\n",
         encoding="utf-8",
     )
     created.append(readme)

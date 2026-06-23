@@ -1,39 +1,20 @@
-EXCEL LAYOUT v3 — MANUAL ENTRY (field layout)
-=============================================
+APPROVED LAYOUT: compact (4 columns)
+====================================
 
-Compared 2 layouts on 2 devices (Kyocera + HP Color):
-  compact score: 370
-  field score:   708  ← WINNER (used in all files)
+Reference file: compare/COMPARE_device1_compact_Card.xlsx
 
-Columns (5):
-  №  |  Поле  |  Значение  |  Ед.  |  Отметка ✓/✗
-
-Row structure:
-  Row 1   Dark blue header
-  Row 2   Legend (frozen with header)
-  Row 3   Green device strip: Model | Serial | Inv | Location
-  Row 4+  Form data
+Columns:
+  Поле  |  Значение  |  Ед.  |  Отметка ✓/✗
 
 Color guide:
-  GREEN strip   Device info always visible (frozen)
-  LIGHT BLUE    Section headers (1. ИДЕНТИФИКАЦИЯ)
-  GREEN band    Checklist steps (ШАГ 1…)
-  LIGHT RED     Red-flag / escalation blocks
-  BLUE cell     Auto-filled from database
-  YELLOW cell   Type manually (thick gold border)
-  GOLD cell     Mark column — ✓ / ✗ / 1-5 (dropdown list)
+  BLUE header     Column titles
+  DARK BLUE band  Document title
+  LIGHT BLUE      Section headers
+  GREEN band      Checklist steps
+  BLUE cell       Auto-filled from database
+  YELLOW cell     Manual input (gold border)
+  GOLD cell       Mark column — ✓ / ✗ / 1-5 (dropdown)
 
-Numbered checks:
-  Column № shows 1, 2, 3… for each checklist item.
-  Say "пункт 7 — проблема" on site.
+Test device: Kyocera ECOSYS M3040dn, inv. 67+, serial LS67Y43279
 
-Entry workflow:
-  1. Read green strip — confirm correct device
-  2. Fill yellow cells only (values + counters)
-  3. Column № + Отметка for each check (click dropdown or type ✓ ✗)
-  4. Scores 1-5 in Отметка for rating rows
-
-Compare samples (optional):
-  output/download/compare/COMPARE_device1_field_Card.xlsx
-  output/download/compare/COMPARE_device1_compact_Card.xlsx
-  output/download/compare/LAYOUT_COMPARE_REPORT.txt
+All TEST_*.xlsx files in this folder use the approved compact layout.
