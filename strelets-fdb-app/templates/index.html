@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Strelets Integral FDB</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Strelets Integral — INTEGRAL.FDB</h1>
+    <p class="muted">Firebird browser for АРМ Стрелец-Интеграл database</p>
+  </header>
+
+  <section class="card">
+    <h2>Connection</h2>
+    <ul>
+      <li><strong>DSN:</strong> {{ info.dsn }}</li>
+      <li><strong>User:</strong> {{ info.user }}</li>
+      <li><strong>User tables:</strong> {{ info.tables }}</li>
+      <li><strong>Read-only:</strong> {{ "yes" if info.read_only else "no" }}</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>Strelets app login (reference)</h2>
+    <p>Used by Конфигуратор/Администратор, not Firebird SQL:</p>
+    <ul>
+      <li><strong>Login:</strong> {{ strelets_user }}</li>
+      <li><strong>Password:</strong> {{ strelets_password }}</li>
+    </ul>
+  </section>
+
+  {% set group_labels = {
+    "events": "Events",
+    "config": "Configuration",
+    "devices": "Devices / topology",
+    "users": "Users",
+    "graphics": "Graphics",
+    "other": "Other tables"
+  } %}
+
+  {% for group_name in ["events", "config", "devices", "users", "graphics", "other"] %}
+    {% if grouped.get(group_name) %}
+    <section class="card">
+      <h2>{{ group_labels[group_name] }}</h2>
+      <ul class="table-list">
+        {% for table in grouped[group_name] %}
+        <li>
+          <a href="/tables/{{ table.name }}">{{ table.name }}</a>
+          <a class="small" href="/tables/{{ table.name }}/schema">schema</a>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+  {% endfor %}
+</body>
+</html>
