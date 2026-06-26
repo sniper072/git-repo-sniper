@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>{{ table_name }} — {{ action }}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <p><a href="/tables/{{ table_name }}">← {{ table_name }}</a></p>
+    <h1>{% if action == "create" %}Add row{% else %}Edit row{% endif %}: {{ table_name }}</h1>
+  </header>
+
+  <form class="card form-grid" method="post"
+        action="{% if action == 'create' %}/tables/{{ table_name }}/create{% else %}/tables/{{ table_name }}/edit{% endif %}">
+    {% if action == "edit" %}
+      <input type="hidden" name="pk" value='{{ pk_query }}'>
+    {% endif %}
+
+    {% for col in columns %}
+      <label for="{{ col.name }}">{{ col.name }} ({{ col.field_type }})</label>
+      <input
+        id="{{ col.name }}"
+        name="{{ col.name }}"
+        value="{{ values.get(col.name, '') }}"
+        {% if not col.nullable and action == 'create' %}required{% endif %}
+      >
+    {% endfor %}
+
+    <div class="form-actions">
+      <button type="submit">Save</button>
+    </div>
+  </form>
+</body>
+</html>
