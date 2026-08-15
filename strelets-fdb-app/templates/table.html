@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>{{ table_name }} — Strelets FDB</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <p><a href="/">← All tables</a></p>
+    <h1>{{ table_name }}</h1>
+    <p class="muted">{{ total }} rows total</p>
+  </header>
+
+  <div class="toolbar">
+    <a href="/tables/{{ table_name }}/schema">Schema</a>
+    {% if not read_only %}
+      <a href="/tables/{{ table_name }}/new">Add row</a>
+    {% endif %}
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          {% for col in columns %}
+          <th>{{ col }}</th>
+          {% endfor %}
+          {% if not read_only and pk_cols %}
+          <th>Actions</th>
+          {% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          {% for value in row.cells %}
+          <td>{{ value }}</td>
+          {% endfor %}
+          {% if not read_only and pk_cols %}
+          <td class="actions">
+            <a href="/tables/{{ table_name }}/edit?pk={{ row.pk_query }}">Edit</a>
+            <form method="post" action="/tables/{{ table_name }}/delete" onsubmit="return confirm('Delete this row?');">
+              <input type="hidden" name="pk" value='{{ row.pk_json | safe }}'>
+              <button type="submit">Delete</button>
+            </form>
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <nav class="pager">
+    {% if page > 1 %}
+      <a href="/tables/{{ table_name }}?page={{ page - 1 }}&limit={{ limit }}">Previous</a>
+    {% endif %}
+    <span>Page {{ page }} / {{ total_pages }}</span>
+    {% if page < total_pages %}
+      <a href="/tables/{{ table_name }}?page={{ page + 1 }}&limit={{ limit }}">Next</a>
+    {% endif %}
+  </nav>
+</body>
+</html>

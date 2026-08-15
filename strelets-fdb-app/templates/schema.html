@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>{{ table_name }} schema</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <p><a href="/tables/{{ table_name }}">← {{ table_name }}</a></p>
+    <h1>Schema: {{ table_name }}</h1>
+    {% if pk_cols %}
+      <p class="muted">Primary key: {{ pk_cols | join(", ") }}</p>
+    {% else %}
+      <p class="warn">No primary key detected — edit/delete disabled.</p>
+    {% endif %}
+  </header>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Column</th>
+          <th>Type</th>
+          <th>Nullable</th>
+          <th>Position</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for col in columns %}
+        <tr>
+          <td>{{ col.name }}</td>
+          <td>{{ col.field_type }}</td>
+          <td>{{ "yes" if col.nullable else "no" }}</td>
+          <td>{{ col.position }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>
